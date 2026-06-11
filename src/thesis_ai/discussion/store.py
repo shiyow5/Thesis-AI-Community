@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS turns (
     idx         INTEGER NOT NULL,
     persona_key TEXT NOT NULL,
     content     TEXT NOT NULL,
+    reply_to    INTEGER,
     PRIMARY KEY (session_id, idx),
     FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 );
@@ -47,6 +48,10 @@ class SessionStore:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            # 既存 DB（reply_to 列が無い）への簡易マイグレーション
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+            if "reply_to" not in cols:
+                conn.execute("ALTER TABLE turns ADD COLUMN reply_to INTEGER")
 
     def save(self, session: DiscussionSession) -> None:
         """セッションを保存（upsert）する。発言は全置換する。"""
@@ -67,9 +72,10 @@ class SessionStore:
             )
             conn.execute("DELETE FROM turns WHERE session_id = ?", (session.session_id,))
             conn.executemany(
-                "INSERT INTO turns (session_id, idx, persona_key, content) VALUES (?, ?, ?, ?)",
+                "INSERT INTO turns (session_id, idx, persona_key, content, reply_to) "
+                "VALUES (?, ?, ?, ?, ?)",
                 [
-                    (session.session_id, idx, turn.persona_key, turn.content)
+                    (session.session_id, idx, turn.persona_key, turn.content, turn.reply_to)
                     for idx, turn in enumerate(session.turns)
                 ],
             )
@@ -85,12 +91,16 @@ class SessionStore:
             if row is None:
                 return None
             turn_rows = conn.execute(
-                "SELECT persona_key, content FROM turns WHERE session_id = ? ORDER BY idx",
+                "SELECT persona_key, content, reply_to FROM turns "
+                "WHERE session_id = ? ORDER BY idx",
                 (session_id,),
             ).fetchall()
 
         paper_title, paper_text, persona_keys_json, status = row
-        turns = tuple(Turn(persona_key=pk, content=content) for pk, content in turn_rows)
+        turns = tuple(
+            Turn(persona_key=pk, content=content, reply_to=reply_to)
+            for pk, content, reply_to in turn_rows
+        )
         return DiscussionSession(
             session_id=session_id,
             paper_title=paper_title,

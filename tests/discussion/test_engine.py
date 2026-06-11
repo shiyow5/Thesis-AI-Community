@@ -89,16 +89,79 @@ async def test_first_turn_prompt_has_no_history() -> None:
     assert "最初の発言" in user_msg
 
 
-async def test_stream_round_accumulates_turns() -> None:
-    router = FakeRouter()
-    engine = _engine(router)
+class ScriptedRouter:
+    """select_next 用と generate 用で出し分けるルーター代用。"""
 
-    results = [(turn, session) async for turn, session in engine.stream_round(_session())]
+    def __init__(self, replies: list[str]) -> None:
+        self._replies = replies
+        self.calls: list[list[Message]] = []
 
-    assert [t.persona_key for t, _ in results] == ["professor", "layperson"]
-    # 最終セッションに 2 発言蓄積
-    final_session = results[-1][1]
-    assert len(final_session.turns) == 2
-    # 2 人目のプロンプトには 1 人目の発言が履歴として含まれる
-    second_user_msg = router.calls[1][-1].content
-    assert "教授: 発言1" in second_user_msg
+    async def generate(self, messages: list[Message], *, max_tokens: int) -> str:
+        self.calls.append(messages)
+        return self._replies.pop(0)
+
+
+async def test_select_next_speaker_returns_key() -> None:
+    engine = DiscussionEngine(ScriptedRouter(["layperson"]))  # type: ignore[arg-type]
+    assert await engine.select_next_speaker(_session()) == "layperson"
+
+
+async def test_select_next_speaker_done_returns_none() -> None:
+    engine = DiscussionEngine(ScriptedRouter(["DONE"]))  # type: ignore[arg-type]
+    assert await engine.select_next_speaker(_session()) is None
+
+
+async def test_next_turn_selects_then_generates() -> None:
+    # 1 回目=司会の選択(expert), 2 回目=発言本文
+    router = ScriptedRouter(["expert", "専門家の発言"])
+    engine = DiscussionEngine(router)  # type: ignore[arg-type]
+
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="body",
+        persona_keys=("professor", "expert", "grad_student", "layperson"),
+    )
+    turn = await engine.next_turn(session)
+
+    assert turn is not None
+    assert turn.persona_key == "expert"
+    assert turn.content == "専門家の発言"
+
+
+async def test_next_turn_returns_none_when_done() -> None:
+    engine = DiscussionEngine(ScriptedRouter(["DONE"]))  # type: ignore[arg-type]
+    assert await engine.next_turn(_session()) is None
+
+
+async def test_generate_turn_parses_reply_marker() -> None:
+    router = ScriptedRouter(["@professor なるほど、その点に補足します。"])
+    engine = DiscussionEngine(router)  # type: ignore[arg-type]
+
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="body",
+        persona_keys=("professor", "expert"),
+        turns=(Turn(persona_key="professor", content="導入"),),
+    )
+    turn = await engine.generate_turn(session, "expert")
+
+    assert turn.reply_to == 0  # professor の発言（index 0）への返信
+    assert turn.content == "なるほど、その点に補足します。"  # マーカー除去済み
+
+
+async def test_generate_turn_ignores_self_reply_marker() -> None:
+    router = ScriptedRouter(["@expert 自分への返信は無視される"])
+    engine = DiscussionEngine(router)  # type: ignore[arg-type]
+
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="body",
+        persona_keys=("professor", "expert"),
+        turns=(Turn(persona_key="expert", content="前の発言"),),
+    )
+    turn = await engine.generate_turn(session, "expert")
+
+    assert turn.reply_to is None

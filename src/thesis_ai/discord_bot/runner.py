@@ -12,6 +12,8 @@ from thesis_ai.discussion.engine import DiscussionEngine
 from thesis_ai.discussion.session import (
     STATUS_IDLE,
     DiscussionSession,
+    Turn,
+    add_turn,
     set_status,
 )
 from thesis_ai.discussion.store import SessionStore
@@ -20,6 +22,21 @@ from thesis_ai.papers.models import Paper
 from thesis_ai.personas import Persona, get_persona
 
 _THREAD_NAME_LIMIT = 100
+_QUOTE_SNIPPET_LIMIT = 80
+
+
+def render_turn(turn: Turn, prior_turns: tuple[Turn, ...]) -> str:
+    """投稿用本文を作る。返信なら引用ブロックで対象発言を示す。
+
+    Webhook はネイティブのリプライ（メッセージ参照）を作れないため引用で代替する。
+    """
+    if turn.reply_to is not None and 0 <= turn.reply_to < len(prior_turns):
+        target = prior_turns[turn.reply_to]
+        persona = get_persona(target.persona_key)
+        name = persona.display_name if persona else target.persona_key
+        snippet = " ".join(target.content.split())[:_QUOTE_SNIPPET_LIMIT]
+        return f"> **{name}**: {snippet}…\n\n{turn.content}"
+    return turn.content
 
 
 async def fetch_text_for(http_client: httpx.AsyncClient, paper: Paper) -> str:
@@ -69,14 +86,14 @@ async def run_discussion(
     poster: PosterTarget,
     engine: DiscussionEngine,
     store: SessionStore,
-    max_rounds: int | None = None,
+    max_turns: int | None = None,
 ) -> DiscussionSession:
     """論文に対する議論を最初から最後まで実行する。
 
-    スレッドを開き、各ペルソナの発言を生成しながら逐次投稿・永続化する。
-    各ラウンド後に司会判定を行い、論点が出尽くせば早期終了する（上限 max_rounds で打ち切り）。
+    スレッドを開き、司会判断で次の発言者を動的に選びながら逐次投稿・永続化する。
+    論点が出尽くせば終了し、暴走防止のため max_turns で打ち切る。
     """
-    limit = max_rounds if max_rounds is not None else engine.max_rounds
+    limit = max_turns if max_turns is not None else engine.max_turns
 
     thread_id = await thread_target.open_thread(
         name=paper.title[:_THREAD_NAME_LIMIT],
@@ -91,16 +108,15 @@ async def run_discussion(
     )
     store.save(session)
 
-    for round_no in range(1, limit + 1):
-        async for turn, updated in engine.stream_round(session):
-            persona = get_persona(turn.persona_key)
-            if persona is not None:
-                await poster.post(persona, turn.content, thread_id=thread_id)
-            session = updated
-            store.save(session)
-
-        if round_no < limit and await engine.is_discussion_concluded(session):
+    for _ in range(limit):
+        turn = await engine.next_turn(session)
+        if turn is None:
             break
+        persona = get_persona(turn.persona_key)
+        if persona is not None:
+            await poster.post(persona, render_turn(turn, session.turns), thread_id=thread_id)
+        session = add_turn(session, turn)
+        store.save(session)
 
     session = set_status(session, STATUS_IDLE)
     store.save(session)

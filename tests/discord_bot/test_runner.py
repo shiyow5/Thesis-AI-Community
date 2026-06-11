@@ -1,21 +1,43 @@
-"""run_discussion / build_intro のテスト（Discord 非依存・FakeRouter 利用）。"""
+"""run_discussion / build_intro / render_turn のテスト（Discord 非依存）。"""
 
 from pathlib import Path
 
-from thesis_ai.discord_bot.runner import build_intro, run_discussion
+from thesis_ai.discord_bot.runner import build_intro, render_turn, run_discussion
 from thesis_ai.discussion.engine import DiscussionEngine
-from thesis_ai.discussion.session import STATUS_IDLE
+from thesis_ai.discussion.session import STATUS_IDLE, Turn
 from thesis_ai.discussion.store import SessionStore
 from thesis_ai.llm.base import Message
 from thesis_ai.papers.models import Paper
 from thesis_ai.personas import Persona
 
 
-class FakeRouter:
+def _is_selection(messages: list[Message]) -> bool:
+    return "次に発言すべき" in messages[-1].content
+
+
+class StubRouter:
+    """司会選択には speakers を順に（尽きたら DONE）、発言生成には連番を返す。"""
+
+    def __init__(self, speakers: list[str]) -> None:
+        self._speakers = list(speakers)
+        self.n = 0
+
+    async def generate(self, messages: list[Message], *, max_tokens: int) -> str:
+        if _is_selection(messages):
+            return self._speakers.pop(0) if self._speakers else "DONE"
+        self.n += 1
+        return f"発言{self.n}"
+
+
+class AlwaysSpeakRouter:
+    """司会選択には常に professor（DONE しない）、発言生成には連番を返す。"""
+
     def __init__(self) -> None:
         self.n = 0
 
     async def generate(self, messages: list[Message], *, max_tokens: int) -> str:
+        if _is_selection(messages):
+            return "professor"
         self.n += 1
         return f"発言{self.n}"
 
@@ -68,7 +90,8 @@ def test_build_intro_truncates_author_list() -> None:
 
 
 async def test_run_discussion_full_flow(tmp_path: Path) -> None:
-    engine = DiscussionEngine(FakeRouter())  # type: ignore[arg-type]
+    speakers = ["professor", "expert", "grad_student", "layperson"]
+    engine = DiscussionEngine(StubRouter(speakers))  # type: ignore[arg-type]
     store = SessionStore(tmp_path / "db.sqlite3")
     thread_target = FakeThreadTarget()
     poster = FakePoster()
@@ -80,15 +103,13 @@ async def test_run_discussion_full_flow(tmp_path: Path) -> None:
         poster=poster,
         engine=engine,
         store=store,
-        max_rounds=1,
     )
 
-    # スレッドが開かれ、4 ペルソナが投稿された
+    # スレッドが開かれ、司会が選んだ 4 名が投稿してから DONE
     assert thread_target.opened["name"] == "Attention Is All You Need"
-    assert len(poster.posts) == 4
+    assert [pk for pk, _, _ in poster.posts] == speakers
     assert all(thread_id == "thread-123" for _, _, thread_id in poster.posts)
 
-    # 最終状態は idle で永続化されている
     assert session.status == STATUS_IDLE
     loaded = store.load("thread-123")
     assert loaded is not None
@@ -96,39 +117,8 @@ async def test_run_discussion_full_flow(tmp_path: Path) -> None:
     assert loaded.status == STATUS_IDLE
 
 
-async def test_run_discussion_multiple_rounds(tmp_path: Path) -> None:
-    # FakeRouter は決して「はい」を返さないので max_rounds まで継続する
-    engine = DiscussionEngine(FakeRouter())  # type: ignore[arg-type]
-    store = SessionStore(tmp_path / "db.sqlite3")
-
-    session = await run_discussion(
-        _paper(),
-        "text",
-        thread_target=FakeThreadTarget(),
-        poster=FakePoster(),
-        engine=engine,
-        store=store,
-        max_rounds=2,
-    )
-
-    assert len(session.turns) == 8  # 4 ペルソナ × 2 ラウンド
-
-
-class ConcludingRouter:
-    """司会判定の問いには「はい」、それ以外は通常発言を返すルーター。"""
-
-    def __init__(self) -> None:
-        self.n = 0
-
-    async def generate(self, messages: list[Message], *, max_tokens: int) -> str:
-        if "出尽くし" in messages[-1].content:
-            return "はい"
-        self.n += 1
-        return f"発言{self.n}"
-
-
-async def test_run_discussion_stops_when_concluded(tmp_path: Path) -> None:
-    engine = DiscussionEngine(ConcludingRouter())  # type: ignore[arg-type]
+async def test_run_discussion_stops_when_done(tmp_path: Path) -> None:
+    engine = DiscussionEngine(StubRouter(["professor"]))  # type: ignore[arg-type]
     store = SessionStore(tmp_path / "db.sqlite3")
     poster = FakePoster()
 
@@ -139,9 +129,41 @@ async def test_run_discussion_stops_when_concluded(tmp_path: Path) -> None:
         poster=poster,
         engine=engine,
         store=store,
-        max_rounds=5,
     )
 
-    # 1 ラウンド後に司会が「はい」→ 早期終了。4 発言のみ
-    assert len(session.turns) == 4
-    assert len(poster.posts) == 4
+    # 1 発言の後に司会が DONE → 終了
+    assert len(session.turns) == 1
+    assert len(poster.posts) == 1
+
+
+async def test_run_discussion_respects_max_turns(tmp_path: Path) -> None:
+    # 司会が決して DONE しない場合でも max_turns で打ち切られる
+    engine = DiscussionEngine(AlwaysSpeakRouter())  # type: ignore[arg-type]
+    store = SessionStore(tmp_path / "db.sqlite3")
+
+    session = await run_discussion(
+        _paper(),
+        "text",
+        thread_target=FakeThreadTarget(),
+        poster=FakePoster(),
+        engine=engine,
+        store=store,
+        max_turns=3,
+    )
+
+    assert len(session.turns) == 3
+
+
+def test_render_turn_plain_when_no_reply() -> None:
+    turn = Turn(persona_key="professor", content="全体への発言")
+    assert render_turn(turn, ()) == "全体への発言"
+
+
+def test_render_turn_quotes_reply_target() -> None:
+    prior = (Turn(persona_key="professor", content="自己注意は重要だ"),)
+    turn = Turn(persona_key="expert", content="同意します", reply_to=0)
+
+    rendered = render_turn(turn, prior)
+
+    assert rendered.startswith("> **教授**: 自己注意は重要だ")
+    assert "同意します" in rendered

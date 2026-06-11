@@ -2,9 +2,11 @@
 
 from thesis_ai.discussion.engine import DiscussionEngine
 from thesis_ai.discussion.interrupt import (
+    build_next_speaker_messages,
     build_selector_messages,
-    parse_affirmative,
+    parse_next_speaker,
     parse_persona_key,
+    parse_reply_marker,
 )
 from thesis_ai.discussion.session import DiscussionSession, Turn
 from thesis_ai.llm.base import Message
@@ -44,21 +46,59 @@ def test_parse_persona_key_falls_back_to_first() -> None:
     assert parse_persona_key("わかりません", keys) == "professor"
 
 
-def test_parse_affirmative() -> None:
-    assert parse_affirmative("はい") is True
-    assert parse_affirmative("  Yes  ") is True
-    assert parse_affirmative("いいえ、まだ質問が残っています") is False
-    assert parse_affirmative("判断できません") is False  # 不明は継続（False）
+def test_parse_next_speaker_returns_key() -> None:
+    keys = ["professor", "expert", "grad_student", "layperson"]
+    assert parse_next_speaker("expert", keys) == "expert"
+    assert parse_next_speaker("  Layperson です\n", keys) == "layperson"
 
 
-async def test_is_discussion_concluded_yes() -> None:
-    engine = DiscussionEngine(ScriptedRouter(["はい"]))  # type: ignore[arg-type]
-    assert await engine.is_discussion_concluded(_session()) is True
+def test_parse_next_speaker_done_or_unknown_returns_none() -> None:
+    keys = ["professor", "expert"]
+    assert parse_next_speaker("DONE", keys) is None
+    assert parse_next_speaker("もう十分です", keys) is None
 
 
-async def test_is_discussion_concluded_no() -> None:
-    engine = DiscussionEngine(ScriptedRouter(["いいえ"]))  # type: ignore[arg-type]
-    assert await engine.is_discussion_concluded(_session()) is False
+def test_build_next_speaker_messages_lists_personas() -> None:
+    messages = build_next_speaker_messages(DEFAULT_PERSONAS, "教授: 導入")
+
+    system = messages[0].content
+    for persona in DEFAULT_PERSONAS:
+        assert persona.key in system
+    assert "次に発言すべき" in messages[1].content
+
+
+_ALIASES = {"professor": "professor", "教授": "professor", "expert": "expert", "専門家": "expert"}
+
+
+def test_parse_reply_marker_extracts_key() -> None:
+    target, body = parse_reply_marker("@professor それは違います", _ALIASES)
+    assert target == "professor"
+    assert body == "それは違います"
+
+
+def test_parse_reply_marker_accepts_display_name() -> None:
+    target, body = parse_reply_marker("@教授\nそれは違います", _ALIASES)
+    assert target == "professor"
+    assert body == "それは違います"
+
+
+def test_parse_reply_marker_tolerates_honorific() -> None:
+    aliases = {"他分野の研究生": "grad_student", "教授": "professor"}
+    target, body = parse_reply_marker("@他分野の研究生さん、鋭い質問ですね。", aliases)
+    assert target == "grad_student"
+    assert body == "鋭い質問ですね。"
+
+
+def test_parse_reply_marker_none_when_no_marker() -> None:
+    target, body = parse_reply_marker("全体への発言です", _ALIASES)
+    assert target is None
+    assert body == "全体への発言です"
+
+
+def test_parse_reply_marker_unknown_ignored() -> None:
+    target, body = parse_reply_marker("@unknown これは？", _ALIASES)
+    assert target is None
+    assert body == "@unknown これは？"
 
 
 def test_build_selector_messages_lists_all_personas() -> None:

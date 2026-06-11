@@ -133,7 +133,9 @@ class ThesisBot(discord.Client):
             self.context.store.save(session)
             persona = get_persona(turn.persona_key)
             if persona is not None:
-                await self.context.poster.post(persona, turn.content, thread_id=thread_id)
+                snippet = " ".join(text.split())[:80]
+                content = f"> **質問**: {snippet}…\n\n{turn.content}"
+                await self.context.poster.post(persona, content, thread_id=thread_id)
 
     async def _start_discussion(self, target: ThreadTarget, query: str) -> None:
         try:

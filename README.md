@@ -25,8 +25,9 @@ cp .env.example .env     # シークレットを記入
 uv run python -m thesis_ai.main
 ```
 
-事前準備（Discord Bot トークン・Webhook 4本・Gemini API キーの取得）と、家庭用 Windows PC での
-**常駐運用（NSSM サービス化）** の手順は [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) を参照。
+事前準備（Discord Bot トークン・Webhook 4本・Gemini API キーの取得）のステップバイステップは
+[docs/SETUP.md](docs/SETUP.md) を参照。家庭用 Windows PC での **常駐運用（NSSM サービス化）** は
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) を参照。
 
 ## 開発
 

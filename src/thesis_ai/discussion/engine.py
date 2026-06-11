@@ -72,7 +72,10 @@ class DiscussionEngine:
                 f"上記を踏まえ、あなた（{persona.display_name}）として議論を続けてください。"
             )
         else:
-            prompt = f"あなた（{persona.display_name}）として、この論文について最初の発言をしてください。"
+            prompt = (
+                f"あなた（{persona.display_name}）として、"
+                "この論文について最初の発言をしてください。"
+            )
         messages.append(Message(role="user", content=prompt))
         return messages
 

@@ -44,6 +44,22 @@ def test_compose_system_includes_persona_and_paper() -> None:
     assert "paper body text" in system
 
 
+def test_compose_system_prefers_summary_over_full_text() -> None:
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="FULL PAPER TEXT" * 100,
+        persona_keys=("professor",),
+        summary="これは要約です。",
+    )
+
+    system = compose_system(PROFESSOR, session, max_paper_chars=100000)
+
+    assert "これは要約です。" in system
+    assert "論文の要約" in system
+    assert "FULL PAPER TEXT" not in system  # 全文は使わない
+
+
 def test_compose_system_truncates_long_paper() -> None:
     session = DiscussionSession(
         session_id="t1",
@@ -99,6 +115,19 @@ class ScriptedRouter:
     async def generate(self, messages: list[Message], *, max_tokens: int) -> str:
         self.calls.append(messages)
         return self._replies.pop(0)
+
+
+async def test_summarize_paper_uses_format_and_paper() -> None:
+    router = ScriptedRouter(["【背景】\n...\n【考察】\n..."])
+    engine = DiscussionEngine(router)  # type: ignore[arg-type]
+
+    out = await engine.summarize_paper(_session())
+
+    assert out == "【背景】\n...\n【考察】\n..."
+    prompt = router.calls[0][-1].content
+    assert "Sample Paper" in prompt
+    for label in ("背景", "目的", "手法", "実験方法", "実験結果", "考察"):
+        assert label in prompt
 
 
 async def test_select_next_speaker_returns_key() -> None:

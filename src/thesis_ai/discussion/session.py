@@ -32,10 +32,11 @@ class DiscussionSession:
     Attributes:
         session_id: Discord スレッド ID（永続化のキー）。
         paper_title: 論文タイトル。
-        paper_text: プロンプトに渡す論文本文（取得済みテキスト）。
+        paper_text: 取得済みの論文本文（要約生成にのみ使用）。
         persona_keys: 参加ペルソナのキー（発言順）。
         turns: これまでの発言列。
         status: ``active`` / ``idle`` / ``done``。
+        summary: 生成済みの論文要約。議論・割り込みの文脈にはこれを使い、全文の再送を避ける。
     """
 
     session_id: str
@@ -44,6 +45,7 @@ class DiscussionSession:
     persona_keys: tuple[str, ...]
     turns: tuple[Turn, ...] = field(default_factory=tuple)
     status: str = STATUS_ACTIVE
+    summary: str | None = None
 
 
 def add_turn(session: DiscussionSession, turn: Turn) -> DiscussionSession:
@@ -54,3 +56,8 @@ def add_turn(session: DiscussionSession, turn: Turn) -> DiscussionSession:
 def set_status(session: DiscussionSession, status: str) -> DiscussionSession:
     """ステータスを更新した新しいセッションを返す。"""
     return replace(session, status=status)
+
+
+def set_summary(session: DiscussionSession, summary: str) -> DiscussionSession:
+    """要約を設定した新しいセッションを返す。"""
+    return replace(session, summary=summary)

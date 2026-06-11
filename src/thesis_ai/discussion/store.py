@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     paper_title  TEXT NOT NULL,
     paper_text   TEXT NOT NULL,
     persona_keys TEXT NOT NULL,
-    status       TEXT NOT NULL
+    status       TEXT NOT NULL,
+    summary      TEXT
 );
 CREATE TABLE IF NOT EXISTS turns (
     session_id  TEXT NOT NULL,
@@ -48,26 +49,32 @@ class SessionStore:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
-            # 既存 DB（reply_to 列が無い）への簡易マイグレーション
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
-            if "reply_to" not in cols:
+            # 既存 DB への簡易マイグレーション
+            turn_cols = {row[1] for row in conn.execute("PRAGMA table_info(turns)")}
+            if "reply_to" not in turn_cols:
                 conn.execute("ALTER TABLE turns ADD COLUMN reply_to INTEGER")
+            session_cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+            if "summary" not in session_cols:
+                conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT")
 
     def save(self, session: DiscussionSession) -> None:
         """セッションを保存（upsert）する。発言は全置換する。"""
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO sessions (session_id, paper_title, paper_text, persona_keys, status) "
-                "VALUES (?, ?, ?, ?, ?) "
+                "INSERT INTO sessions "
+                "(session_id, paper_title, paper_text, persona_keys, status, summary) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(session_id) DO UPDATE SET "
                 "paper_title=excluded.paper_title, paper_text=excluded.paper_text, "
-                "persona_keys=excluded.persona_keys, status=excluded.status",
+                "persona_keys=excluded.persona_keys, status=excluded.status, "
+                "summary=excluded.summary",
                 (
                     session.session_id,
                     session.paper_title,
                     session.paper_text,
                     json.dumps(list(session.persona_keys)),
                     session.status,
+                    session.summary,
                 ),
             )
             conn.execute("DELETE FROM turns WHERE session_id = ?", (session.session_id,))
@@ -84,7 +91,7 @@ class SessionStore:
         """セッションを読み込む。存在しなければ None。"""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT paper_title, paper_text, persona_keys, status "
+                "SELECT paper_title, paper_text, persona_keys, status, summary "
                 "FROM sessions WHERE session_id = ?",
                 (session_id,),
             ).fetchone()
@@ -96,7 +103,7 @@ class SessionStore:
                 (session_id,),
             ).fetchall()
 
-        paper_title, paper_text, persona_keys_json, status = row
+        paper_title, paper_text, persona_keys_json, status, summary = row
         turns = tuple(
             Turn(persona_key=pk, content=content, reply_to=reply_to)
             for pk, content, reply_to in turn_rows
@@ -108,6 +115,7 @@ class SessionStore:
             persona_keys=tuple(json.loads(persona_keys_json)),
             turns=turns,
             status=status,
+            summary=summary,
         )
 
     def delete(self, session_id: str) -> None:

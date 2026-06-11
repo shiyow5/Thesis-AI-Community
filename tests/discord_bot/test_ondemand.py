@@ -33,9 +33,15 @@ class FakeThreadTarget:
 class FakePoster:
     def __init__(self) -> None:
         self.count = 0
+        self.notices = 0
 
     async def post(self, persona: Persona, content: str, *, thread_id: str | None = None) -> None:
         self.count += 1
+
+    async def post_notice(
+        self, content: str, *, thread_id: str | None = None, username: str = "📄 論文要約"
+    ) -> None:
+        self.notices += 1
 
 
 _ATOM = """<?xml version="1.0" encoding="UTF-8"?>

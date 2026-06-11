@@ -17,10 +17,22 @@ from thesis_ai.llm.base import Message
 from thesis_ai.llm.router import LLMRouter
 from thesis_ai.personas import DEFAULT_PERSONAS, Persona
 
-_DEFAULT_MAX_PAPER_CHARS = 200_000
+# 要約生成に渡す論文本文の上限。Gemma 無料枠の入力 16,000 tokens/分 に収まる範囲に抑える
+_DEFAULT_MAX_PAPER_CHARS = 48_000
 _DEFAULT_MAX_TURNS = 20
 _DEFAULT_MAX_TOKENS = 1024
 _DEFAULT_INTERRUPT_MAX_TOKENS = 1536
+_SUMMARY_MAX_TOKENS = 2048
+
+_SUMMARY_SYSTEM = "あなたは論文を分かりやすく日本語で要約する専門家です。"
+_SUMMARY_INSTRUCTION = (
+    "この論文について、背景、目的、手法、実験方法、実験結果、考察の順に説明してください。\n\n"
+    "ただしそれぞれの説明は簡潔に、具体的で、提案手法について特に詳しく、"
+    "長くても1000文字で収めてください。\n\n"
+    "フォーマットは以下の通りです。\n\n"
+    "【背景】\n\n日本語の説明1\n日本語の説明2\n\n"
+    "【目的】\n\n…\n\n【手法】\n\n…\n\n【実験方法】\n\n…\n\n【実験結果】\n\n…\n\n【考察】\n\n…"
+)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -30,13 +42,21 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def compose_system(persona: Persona, session: DiscussionSession, *, max_paper_chars: int) -> str:
-    """ペルソナ用の system プロンプトを組み立てる。"""
-    paper = _truncate(session.paper_text or session.paper_title, max_paper_chars)
+    """ペルソナ用の system プロンプトを組み立てる。
+
+    要約があればそれを文脈に使い（全文の再送を避けてトークン消費を抑える）、無ければ
+    本文を切り詰めて使う。
+    """
+    if session.summary:
+        label, context = "# 論文の要約", session.summary
+    else:
+        label = "# 議論対象の論文"
+        context = _truncate(session.paper_text or session.paper_title, max_paper_chars)
     return (
         f"{persona.system_prompt}\n\n"
-        "# 議論対象の論文\n"
+        f"{label}\n"
         f"タイトル: {session.paper_title}\n\n"
-        f"{paper}\n\n"
+        f"{context}\n\n"
         "# 発言ルール\n"
         "- 必ず日本語で、あなたの視点から簡潔に発言する（200〜400字程度）\n"
         "- 他の参加者の発言を踏まえ、質問・反論・補足・言い換えを行う\n"
@@ -130,6 +150,19 @@ class DiscussionEngine:
         if marker_key is not None and marker_key != persona_key:
             reply_to = _latest_index(session, marker_key)
         return Turn(persona_key=persona_key, content=content.strip(), reply_to=reply_to)
+
+    async def summarize_paper(self, session: DiscussionSession) -> str:
+        """議論に先立ち、論文の構造化要約（背景〜考察）を生成する。"""
+        paper = _truncate(session.paper_text or session.paper_title, self._max_paper_chars)
+        user = f"# 論文\nタイトル: {session.paper_title}\n\n{paper}\n\n{_SUMMARY_INSTRUCTION}"
+        text = await self._router.generate(
+            [
+                Message(role="system", content=_SUMMARY_SYSTEM),
+                Message(role="user", content=user),
+            ],
+            max_tokens=_SUMMARY_MAX_TOKENS,
+        )
+        return text.strip()
 
     async def select_next_speaker(self, session: DiscussionSession) -> str | None:
         """次に発言すべきペルソナのキーを選ぶ。終了すべきなら None。"""

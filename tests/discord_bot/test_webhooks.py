@@ -118,6 +118,28 @@ async def test_post_raises_on_server_error() -> None:
             await _poster(client).post(PROFESSOR, "hi")
 
 
+@respx.mock
+async def test_post_notice_uses_username_override() -> None:
+    import json
+
+    route = respx.post(WEBHOOK_URL).mock(return_value=httpx.Response(204))
+
+    async with httpx.AsyncClient() as client:
+        await _poster(client).post_notice("要約本文", thread_id="9", username="📄 要約")
+
+    body = json.loads(route.calls.last.request.read())
+    assert body["username"] == "📄 要約"
+    assert body["content"] == "要約本文"
+    assert route.calls.last.request.url.params["thread_id"] == "9"
+
+
+async def test_post_notice_without_webhook_raises() -> None:
+    async with httpx.AsyncClient() as client:
+        poster = PersonaWebhookPoster(client, {}, min_interval=0.0, sleep=_noop_sleep)
+        with pytest.raises(WebhookError, match="no webhook"):
+            await poster.post_notice("x")
+
+
 async def test_post_unknown_webhook_raises() -> None:
     async with httpx.AsyncClient() as client:
         poster = PersonaWebhookPoster(client, {}, min_interval=0.0, sleep=_noop_sleep)

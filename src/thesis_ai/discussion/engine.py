@@ -6,6 +6,7 @@
 
 from collections.abc import AsyncIterator
 
+from thesis_ai.discussion.interrupt import build_selector_messages, parse_persona_key
 from thesis_ai.discussion.session import DiscussionSession, Turn, add_turn
 from thesis_ai.llm.base import Message
 from thesis_ai.llm.router import LLMRouter
@@ -102,3 +103,30 @@ class DiscussionEngine:
             turn = await self.generate_turn(current, persona_key)
             current = add_turn(current, turn)
             yield turn, current
+
+    async def select_responder(self, session: DiscussionSession, user_message: str) -> str:
+        """ユーザーの質問に最も適切に答えられるペルソナのキーを選ぶ。"""
+        personas = tuple(self._personas[k] for k in session.persona_keys if k in self._personas)
+        if not personas:
+            personas = tuple(self._personas.values())
+        messages = build_selector_messages(personas, user_message)
+        raw = await self._router.generate(messages, max_tokens=16)
+        return parse_persona_key(raw, [p.key for p in personas])
+
+    async def answer_interrupt(self, session: DiscussionSession, user_message: str) -> Turn:
+        """議論中のユーザーの割り込み質問に、最適なペルソナとして回答する。"""
+        persona_key = await self.select_responder(session, user_message)
+        persona = self._personas[persona_key]
+        system = compose_system(persona, session, max_paper_chars=self._max_paper_chars)
+        history = format_history(session.turns, self._personas)
+        history_block = f"これまでの議論:\n{history}\n\n" if history else ""
+        prompt = (
+            f"{history_block}"
+            f"参加者への質問: {user_message}\n\n"
+            f"あなた（{persona.display_name}）として、この質問に日本語で分かりやすく答えてください。"
+        )
+        text = await self._router.generate(
+            [Message(role="system", content=system), Message(role="user", content=prompt)],
+            max_tokens=self._max_tokens,
+        )
+        return Turn(persona_key=persona_key, content=text.strip())

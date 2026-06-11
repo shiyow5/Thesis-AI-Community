@@ -51,8 +51,17 @@ follow_imports = "skip"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "--cov=thesis_ai --cov-report=term-missing"
+addopts = "--cov=thesis_ai --cov-report=term-missing --cov-fail-under=80"
 filterwarnings = [
     # discord.py が内部で import する audioop の非推奨警告（音声機能は未使用）
     "ignore:'audioop' is deprecated:DeprecationWarning",
+]
+
+[tool.coverage.run]
+omit = [
+    # discord.py に直接依存する薄いグルー層。ユニットテストではなく手動 E2E で検証する。
+    "src/thesis_ai/main.py",
+    "src/thesis_ai/discord_bot/bot.py",
+    "src/thesis_ai/discord_bot/commands.py",
+    "src/thesis_ai/discord_bot/targets.py",
 ]

@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     flash_model: str = "gemini-2.5-flash-lite"
 
     # --- 議論ポリシー ---
-    discussion_max_rounds: int = 4
+    # 1 論文あたりの総発言数の上限（暴走防止）。司会判断で論点が尽きれば上限前に終了する
+    discussion_max_turns: int = 20
 
     # --- ローカルフォールバック ---
     local_llm_base_url: str = "http://localhost:1234/v1"

@@ -71,7 +71,7 @@ def build_bot(settings: Settings, http_client: httpx.AsyncClient) -> ThesisBot:
     """設定と HTTP クライアントから bot を組み立てる。"""
     engine = DiscussionEngine(
         build_router(settings, http_client),
-        max_rounds=settings.discussion_max_rounds,
+        max_turns=settings.discussion_max_turns,
     )
     store = SessionStore(_DB_PATH)
     poster = PersonaWebhookPoster(http_client, settings.webhook_map())

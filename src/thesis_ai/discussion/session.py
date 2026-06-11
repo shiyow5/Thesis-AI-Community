@@ -12,10 +12,17 @@ STATUS_DONE = "done"
 
 @dataclass(frozen=True)
 class Turn:
-    """1 つの発言。"""
+    """1 つの発言。
+
+    Attributes:
+        persona_key: 発言したペルソナ。
+        content: 発言本文。
+        reply_to: 特定の過去発言への返信ならその発言のインデックス。全体/新論点なら None。
+    """
 
     persona_key: str
     content: str
+    reply_to: int | None = None
 
 
 @dataclass(frozen=True)

@@ -14,7 +14,14 @@ from thesis_ai.personas import Persona
 
 
 class FakeRouter:
+    """司会選択には4名を順に返し（その後 DONE）、発言生成には定型を返す。"""
+
+    def __init__(self) -> None:
+        self._speakers = ["professor", "expert", "grad_student", "layperson"]
+
     async def generate(self, messages: list[Message], *, max_tokens: int) -> str:
+        if "次に発言すべき" in messages[-1].content:
+            return self._speakers.pop(0) if self._speakers else "DONE"
         return "発言"
 
 
@@ -36,7 +43,7 @@ def _hf_entry(arxiv_id: str, upvotes: int) -> dict[str, object]:
 
 
 def _deps(tmp_path: Path) -> tuple[DiscussionEngine, SessionStore, FakePoster, FakeThreadTarget]:
-    engine = DiscussionEngine(FakeRouter(), max_rounds=1)  # type: ignore[arg-type]
+    engine = DiscussionEngine(FakeRouter())  # type: ignore[arg-type]
     store = SessionStore(tmp_path / "db.sqlite3")
     return engine, store, FakePoster(), FakeThreadTarget()
 

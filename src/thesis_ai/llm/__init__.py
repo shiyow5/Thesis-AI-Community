@@ -8,6 +8,7 @@ from thesis_ai.llm.base import (
     TransientLLMError,
 )
 from thesis_ai.llm.gemini import GeminiClient
+from thesis_ai.llm.local import LocalLLMClient
 from thesis_ai.llm.router import LLMRouter, RoutedModel, SlidingRateLimiter
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "LLMClient",
     "LLMError",
     "LLMRouter",
+    "LocalLLMClient",
     "Message",
     "RateLimitError",
     "RoutedModel",

@@ -16,6 +16,7 @@ from thesis_ai.discord_bot.webhooks import PersonaWebhookPoster
 from thesis_ai.discussion.engine import DiscussionEngine
 from thesis_ai.discussion.store import SessionStore
 from thesis_ai.llm.gemini import GeminiClient
+from thesis_ai.llm.local import LocalLLMClient
 from thesis_ai.llm.router import LLMRouter, RoutedModel, SlidingRateLimiter
 
 logger = logging.getLogger(__name__)
@@ -23,13 +24,15 @@ logger = logging.getLogger(__name__)
 # 無料枠の保守的な既定値（実値は AI Studio で確認のうえ調整）
 _GEMMA_RPM, _GEMMA_RPD = 10, 1400
 _FLASH_RPM, _FLASH_RPD = 10, 240
+# ローカルは枠制限が無いため十分大きい値を設定
+_LOCAL_RPM, _LOCAL_RPD = 1000, 1_000_000
 
 _DB_PATH = "data/sessions.sqlite3"
 _DAILY_TIME = datetime.time(hour=9, minute=0)
 
 
-def build_router(settings: Settings) -> LLMRouter:
-    """Gemma 4（主力）→ Gemini Flash（品質補完）のフォールバックチェーンを構成する。"""
+def build_router(settings: Settings, http_client: httpx.AsyncClient) -> LLMRouter:
+    """Gemma 4（主力）→ Gemini Flash（品質補完）→ ローカル（任意）のチェーンを構成する。"""
     gemma = GeminiClient(api_key=settings.gemini_api_key, model=settings.gemma_model)
     flash = GeminiClient(api_key=settings.gemini_api_key, model=settings.flash_model)
     chain = [
@@ -44,12 +47,25 @@ def build_router(settings: Settings) -> LLMRouter:
             limiter=SlidingRateLimiter(max_per_minute=_FLASH_RPM, max_per_day=_FLASH_RPD),
         ),
     ]
+    if settings.local_llm_model:
+        local = LocalLLMClient(
+            http_client,
+            base_url=settings.local_llm_base_url,
+            model=settings.local_llm_model,
+        )
+        chain.append(
+            RoutedModel(
+                name="local",
+                client=local,
+                limiter=SlidingRateLimiter(max_per_minute=_LOCAL_RPM, max_per_day=_LOCAL_RPD),
+            )
+        )
     return LLMRouter(chain)
 
 
 def build_bot(settings: Settings, http_client: httpx.AsyncClient) -> ThesisBot:
     """設定と HTTP クライアントから bot を組み立てる。"""
-    engine = DiscussionEngine(build_router(settings))
+    engine = DiscussionEngine(build_router(settings, http_client))
     store = SessionStore(_DB_PATH)
     poster = PersonaWebhookPoster(http_client, settings.webhook_map())
     context = BotContext(

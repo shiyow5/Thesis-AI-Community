@@ -12,9 +12,10 @@ def _session() -> DiscussionSession:
         paper_title="Attention Is All You Need",
         paper_text="full text",
         persona_keys=("professor", "expert"),
+        summary="要約テキスト",
     )
-    base = add_turn(base, Turn(persona_key="professor", content="発言1"))
-    return add_turn(base, Turn(persona_key="expert", content="発言2"))
+    base = add_turn(base, Turn(persona_key="professor", content="発言1", reply_to=None))
+    return add_turn(base, Turn(persona_key="expert", content="発言2", reply_to=0))
 
 
 def test_save_and_load_roundtrip(tmp_path: Path) -> None:

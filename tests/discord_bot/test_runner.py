@@ -54,9 +54,15 @@ class FakeThreadTarget:
 class FakePoster:
     def __init__(self) -> None:
         self.posts: list[tuple[str, str, str | None]] = []
+        self.notices: list[tuple[str, str | None]] = []
 
     async def post(self, persona: Persona, content: str, *, thread_id: str | None = None) -> None:
         self.posts.append((persona.key, content, thread_id))
+
+    async def post_notice(
+        self, content: str, *, thread_id: str | None = None, username: str = "📄 論文要約"
+    ) -> None:
+        self.notices.append((content, thread_id))
 
 
 def _paper() -> Paper:
@@ -74,7 +80,6 @@ def test_build_intro_contains_key_fields() -> None:
     intro = build_intro(_paper())
 
     assert "Attention Is All You Need" in intro
-    assert "AI 要約" in intro
     assert "https://arxiv.org/abs/1706.03762" in intro
 
 
@@ -105,8 +110,10 @@ async def test_run_discussion_full_flow(tmp_path: Path) -> None:
         store=store,
     )
 
-    # スレッドが開かれ、司会が選んだ 4 名が投稿してから DONE
+    # スレッドが開かれ、要約が1件投稿されてから、司会が選んだ 4 名が発言
     assert thread_target.opened["name"] == "Attention Is All You Need"
+    assert len(poster.notices) == 1  # 論文要約
+    assert poster.notices[0][1] == "thread-123"
     assert [pk for pk, _, _ in poster.posts] == speakers
     assert all(thread_id == "thread-123" for _, _, thread_id in poster.posts)
 

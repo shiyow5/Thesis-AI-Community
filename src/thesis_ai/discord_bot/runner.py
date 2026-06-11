@@ -15,6 +15,7 @@ from thesis_ai.discussion.session import (
     Turn,
     add_turn,
     set_status,
+    set_summary,
 )
 from thesis_ai.discussion.store import SessionStore
 from thesis_ai.papers.fetch import fetch_paper_text
@@ -54,24 +55,28 @@ class ThreadTarget(Protocol):
 
 
 class PosterTarget(Protocol):
-    """ペルソナ発言の投稿先（実体は PersonaWebhookPoster）。"""
+    """投稿先（実体は PersonaWebhookPoster）。"""
 
     async def post(
         self, persona: Persona, content: str, *, thread_id: str | None = ...
     ) -> None: ...
 
+    async def post_notice(
+        self, content: str, *, thread_id: str | None = ..., username: str = ...
+    ) -> None: ...
+
 
 def build_intro(paper: Paper) -> str:
-    """スレッド冒頭に投稿する論文紹介文を作る。"""
+    """スレッド冒頭（スレッド開始メッセージ）に投稿する論文紹介を作る。
+
+    詳細な要約は別途生成して投稿するため、ここではタイトル・著者・リンクのみに留める。
+    """
     authors = "、".join(paper.authors[:5])
     if len(paper.authors) > 5:
         authors += " ほか"
-    summary = paper.ai_summary or paper.abstract
     lines = [f"**📄 {paper.title}**"]
     if authors:
         lines.append(f"_{authors}_")
-    if summary:
-        lines.append(f"\n{summary}")
     if paper.url:
         lines.append(f"\n🔗 {paper.url}")
     lines.append("\n4人のAIが議論します。気になったら気軽に割り込んで質問してください。")
@@ -90,8 +95,8 @@ async def run_discussion(
 ) -> DiscussionSession:
     """論文に対する議論を最初から最後まで実行する。
 
-    スレッドを開き、司会判断で次の発言者を動的に選びながら逐次投稿・永続化する。
-    論点が出尽くせば終了し、暴走防止のため max_turns で打ち切る。
+    スレッドを開き、まず論文要約を投稿してから、司会判断で次の発言者を動的に選びながら
+    逐次投稿・永続化する。論点が出尽くせば終了し、暴走防止のため max_turns で打ち切る。
     """
     limit = max_turns if max_turns is not None else engine.max_turns
 
@@ -106,6 +111,13 @@ async def run_discussion(
         paper_text=paper_text,
         persona_keys=engine.persona_keys,
     )
+    store.save(session)
+
+    # 議論に先立ち、論文の構造化要約をスレッド冒頭に投稿する。
+    # 以降の発言は全文ではなくこの要約を文脈に使い、トークン消費を抑える。
+    summary = await engine.summarize_paper(session)
+    await poster.post_notice(summary, thread_id=thread_id)
+    session = set_summary(session, summary)
     store.save(session)
 
     for _ in range(limit):

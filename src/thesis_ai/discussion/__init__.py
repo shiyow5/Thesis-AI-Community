@@ -6,6 +6,7 @@ from thesis_ai.discussion.session import (
     Turn,
     add_turn,
     set_status,
+    set_summary,
 )
 from thesis_ai.discussion.store import SessionStore
 
@@ -16,4 +17,5 @@ __all__ = [
     "Turn",
     "add_turn",
     "set_status",
+    "set_summary",
 ]

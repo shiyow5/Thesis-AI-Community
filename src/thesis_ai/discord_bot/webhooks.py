@@ -98,16 +98,28 @@ class PersonaWebhookPoster:
         url = self._urls.get(persona.webhook_env)
         if not url:
             raise WebhookError(f"webhook URL not configured for {persona.webhook_env}")
+        avatar = self._avatars.get(persona.key)
 
         for chunk in chunk_content(content):
             await self._respect_interval()
-            await self._post_chunk(url, persona, chunk, thread_id)
+            await self._post_chunk(url, persona.display_name, avatar, chunk, thread_id)
+
+    async def post_notice(
+        self, content: str, *, thread_id: str | None = None, username: str = "📄 論文要約"
+    ) -> None:
+        """ペルソナ以外の名義（要約など）で投稿する。設定済みの任意の Webhook を使う。"""
+        url = next(iter(self._urls.values()), None)
+        if not url:
+            raise WebhookError("no webhook URL configured")
+
+        for chunk in chunk_content(content):
+            await self._respect_interval()
+            await self._post_chunk(url, username, None, chunk, thread_id)
 
     async def _post_chunk(
-        self, url: str, persona: Persona, content: str, thread_id: str | None
+        self, url: str, username: str, avatar: str | None, content: str, thread_id: str | None
     ) -> None:
-        payload: dict[str, str] = {"content": content, "username": persona.display_name}
-        avatar = self._avatars.get(persona.key)
+        payload: dict[str, str] = {"content": content, "username": username}
         if avatar:
             payload["avatar_url"] = avatar
         params = {"wait": "true"}

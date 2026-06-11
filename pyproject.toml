@@ -5,7 +5,9 @@ description = "Discord AI personas that discuss academic papers to aid understan
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "httpx>=0.28.1",
     "pydantic-settings>=2.7",
+    "pymupdf>=1.27.2.3",
 ]
 
 [dependency-groups]
@@ -15,6 +17,7 @@ dev = [
     "pytest-cov>=6.0",
     "mypy>=1.13",
     "ruff>=0.8",
+    "respx>=0.23.1",
 ]
 
 [build-system]
@@ -38,6 +41,10 @@ strict = true
 plugins = ["pydantic.mypy"]
 mypy_path = "src"
 explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["pymupdf"]
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

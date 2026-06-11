@@ -60,7 +60,7 @@ async def test_run_on_demand_resolves_and_runs(tmp_path: Path) -> None:
     respx.get("https://arxiv-txt.org/pdf/1706.03762").mock(
         return_value=httpx.Response(200, text="full text")
     )
-    engine = DiscussionEngine(FakeRouter())  # type: ignore[arg-type]
+    engine = DiscussionEngine(FakeRouter(), max_rounds=1)  # type: ignore[arg-type]
     store = SessionStore(tmp_path / "db.sqlite3")
     poster = FakePoster()
 
@@ -83,7 +83,7 @@ async def test_run_on_demand_resolves_and_runs(tmp_path: Path) -> None:
 async def test_run_on_demand_returns_none_when_unresolved(tmp_path: Path) -> None:
     empty = '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>'
     respx.get(ARXIV_API_URL).mock(return_value=httpx.Response(200, text=empty))
-    engine = DiscussionEngine(FakeRouter())  # type: ignore[arg-type]
+    engine = DiscussionEngine(FakeRouter(), max_rounds=1)  # type: ignore[arg-type]
     store = SessionStore(tmp_path / "db.sqlite3")
     poster = FakePoster()
 

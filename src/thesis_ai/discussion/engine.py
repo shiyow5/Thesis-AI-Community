@@ -6,13 +6,23 @@
 
 from collections.abc import AsyncIterator
 
-from thesis_ai.discussion.interrupt import build_selector_messages, parse_persona_key
+from thesis_ai.discussion.interrupt import (
+    build_selector_messages,
+    parse_affirmative,
+    parse_persona_key,
+)
 from thesis_ai.discussion.session import DiscussionSession, Turn, add_turn
 from thesis_ai.llm.base import Message
 from thesis_ai.llm.router import LLMRouter
 from thesis_ai.personas import DEFAULT_PERSONAS, Persona
 
 _DEFAULT_MAX_PAPER_CHARS = 200_000
+_DEFAULT_MAX_ROUNDS = 4
+
+_CONCLUDE_SYSTEM = (
+    "あなたは議論の司会者です。これまでの議論を読み、論点が十分に出尽くし、"
+    "参加者から投げられた質問にも答えが出ていて、自然に終えてよい状態かどうかを判断します。"
+)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -32,6 +42,7 @@ def compose_system(persona: Persona, session: DiscussionSession, *, max_paper_ch
         "# 発言ルール\n"
         "- 必ず日本語で、あなたの視点から簡潔に発言する（200〜400字程度）\n"
         "- 他の参加者の発言があれば踏まえ、質問・反論・補足・言い換えを行う\n"
+        "- 直前までに他の参加者が投げた質問が未回答なら、可能な範囲で必ず答える\n"
         "- 名前や見出しを付けず、発言内容のみを書く"
     )
 
@@ -56,11 +67,13 @@ class DiscussionEngine:
         personas: tuple[Persona, ...] = DEFAULT_PERSONAS,
         max_tokens: int = 1024,
         max_paper_chars: int = _DEFAULT_MAX_PAPER_CHARS,
+        max_rounds: int = _DEFAULT_MAX_ROUNDS,
     ) -> None:
         self._router = router
         self._personas = {p.key: p for p in personas}
         self._max_tokens = max_tokens
         self._max_paper_chars = max_paper_chars
+        self.max_rounds = max_rounds
 
     @property
     def persona_keys(self) -> tuple[str, ...]:
@@ -103,6 +116,24 @@ class DiscussionEngine:
             turn = await self.generate_turn(current, persona_key)
             current = add_turn(current, turn)
             yield turn, current
+
+    async def is_discussion_concluded(self, session: DiscussionSession) -> bool:
+        """議論が自然に終えてよい状態か（論点が出尽くし未回答質問が無いか）を判定する。"""
+        history = format_history(session.turns, self._personas)
+        prompt = (
+            f"これまでの議論:\n{history}\n\n"
+            "この議論は論点が十分に出尽くし、参加者が投げた質問にも答えが出ていて、"
+            "自然に終えてよい状態ですか？未回答の質問が残っていれば「いいえ」と答えてください。"
+            "「はい」または「いいえ」だけで答えてください。"
+        )
+        raw = await self._router.generate(
+            [
+                Message(role="system", content=_CONCLUDE_SYSTEM),
+                Message(role="user", content=prompt),
+            ],
+            max_tokens=8,
+        )
+        return parse_affirmative(raw)
 
     async def select_responder(self, session: DiscussionSession, user_message: str) -> str:
         """ユーザーの質問に最も適切に答えられるペルソナのキーを選ぶ。"""

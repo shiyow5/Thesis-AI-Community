@@ -69,12 +69,15 @@ async def run_discussion(
     poster: PosterTarget,
     engine: DiscussionEngine,
     store: SessionStore,
-    rounds: int = 1,
+    max_rounds: int | None = None,
 ) -> DiscussionSession:
     """論文に対する議論を最初から最後まで実行する。
 
     スレッドを開き、各ペルソナの発言を生成しながら逐次投稿・永続化する。
+    各ラウンド後に司会判定を行い、論点が出尽くせば早期終了する（上限 max_rounds で打ち切り）。
     """
+    limit = max_rounds if max_rounds is not None else engine.max_rounds
+
     thread_id = await thread_target.open_thread(
         name=paper.title[:_THREAD_NAME_LIMIT],
         intro=build_intro(paper),
@@ -88,13 +91,16 @@ async def run_discussion(
     )
     store.save(session)
 
-    for _ in range(rounds):
+    for round_no in range(1, limit + 1):
         async for turn, updated in engine.stream_round(session):
             persona = get_persona(turn.persona_key)
             if persona is not None:
                 await poster.post(persona, turn.content, thread_id=thread_id)
             session = updated
             store.save(session)
+
+        if round_no < limit and await engine.is_discussion_concluded(session):
+            break
 
     session = set_status(session, STATUS_IDLE)
     store.save(session)

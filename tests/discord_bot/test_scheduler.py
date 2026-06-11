@@ -36,7 +36,7 @@ def _hf_entry(arxiv_id: str, upvotes: int) -> dict[str, object]:
 
 
 def _deps(tmp_path: Path) -> tuple[DiscussionEngine, SessionStore, FakePoster, FakeThreadTarget]:
-    engine = DiscussionEngine(FakeRouter())  # type: ignore[arg-type]
+    engine = DiscussionEngine(FakeRouter(), max_rounds=1)  # type: ignore[arg-type]
     store = SessionStore(tmp_path / "db.sqlite3")
     return engine, store, FakePoster(), FakeThreadTarget()
 

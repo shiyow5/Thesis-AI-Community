@@ -1,7 +1,11 @@
 """割り込み応答（select_responder / answer_interrupt / parser）のテスト。"""
 
 from thesis_ai.discussion.engine import DiscussionEngine
-from thesis_ai.discussion.interrupt import build_selector_messages, parse_persona_key
+from thesis_ai.discussion.interrupt import (
+    build_selector_messages,
+    parse_affirmative,
+    parse_persona_key,
+)
 from thesis_ai.discussion.session import DiscussionSession, Turn
 from thesis_ai.llm.base import Message
 from thesis_ai.personas import DEFAULT_PERSONAS
@@ -38,6 +42,23 @@ def test_parse_persona_key_matches() -> None:
 def test_parse_persona_key_falls_back_to_first() -> None:
     keys = ["professor", "expert"]
     assert parse_persona_key("わかりません", keys) == "professor"
+
+
+def test_parse_affirmative() -> None:
+    assert parse_affirmative("はい") is True
+    assert parse_affirmative("  Yes  ") is True
+    assert parse_affirmative("いいえ、まだ質問が残っています") is False
+    assert parse_affirmative("判断できません") is False  # 不明は継続（False）
+
+
+async def test_is_discussion_concluded_yes() -> None:
+    engine = DiscussionEngine(ScriptedRouter(["はい"]))  # type: ignore[arg-type]
+    assert await engine.is_discussion_concluded(_session()) is True
+
+
+async def test_is_discussion_concluded_no() -> None:
+    engine = DiscussionEngine(ScriptedRouter(["いいえ"]))  # type: ignore[arg-type]
+    assert await engine.is_discussion_concluded(_session()) is False
 
 
 def test_build_selector_messages_lists_all_personas() -> None:

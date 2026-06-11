@@ -80,6 +80,7 @@ async def test_run_discussion_full_flow(tmp_path: Path) -> None:
         poster=poster,
         engine=engine,
         store=store,
+        max_rounds=1,
     )
 
     # スレッドが開かれ、4 ペルソナが投稿された
@@ -96,6 +97,7 @@ async def test_run_discussion_full_flow(tmp_path: Path) -> None:
 
 
 async def test_run_discussion_multiple_rounds(tmp_path: Path) -> None:
+    # FakeRouter は決して「はい」を返さないので max_rounds まで継続する
     engine = DiscussionEngine(FakeRouter())  # type: ignore[arg-type]
     store = SessionStore(tmp_path / "db.sqlite3")
 
@@ -106,7 +108,40 @@ async def test_run_discussion_multiple_rounds(tmp_path: Path) -> None:
         poster=FakePoster(),
         engine=engine,
         store=store,
-        rounds=2,
+        max_rounds=2,
     )
 
     assert len(session.turns) == 8  # 4 ペルソナ × 2 ラウンド
+
+
+class ConcludingRouter:
+    """司会判定の問いには「はい」、それ以外は通常発言を返すルーター。"""
+
+    def __init__(self) -> None:
+        self.n = 0
+
+    async def generate(self, messages: list[Message], *, max_tokens: int) -> str:
+        if "出尽くし" in messages[-1].content:
+            return "はい"
+        self.n += 1
+        return f"発言{self.n}"
+
+
+async def test_run_discussion_stops_when_concluded(tmp_path: Path) -> None:
+    engine = DiscussionEngine(ConcludingRouter())  # type: ignore[arg-type]
+    store = SessionStore(tmp_path / "db.sqlite3")
+    poster = FakePoster()
+
+    session = await run_discussion(
+        _paper(),
+        "text",
+        thread_target=FakeThreadTarget(),
+        poster=poster,
+        engine=engine,
+        store=store,
+        max_rounds=5,
+    )
+
+    # 1 ラウンド後に司会が「はい」→ 早期終了。4 発言のみ
+    assert len(session.turns) == 4
+    assert len(poster.posts) == 4

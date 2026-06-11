@@ -1,0 +1,49 @@
+"""議論セッションの不変状態と更新関数。
+
+状態は frozen dataclass とし、変更は新しいコピーを返す関数で行う（in-place 変更禁止）。
+"""
+
+from dataclasses import dataclass, field, replace
+
+STATUS_ACTIVE = "active"
+STATUS_IDLE = "idle"
+STATUS_DONE = "done"
+
+
+@dataclass(frozen=True)
+class Turn:
+    """1 つの発言。"""
+
+    persona_key: str
+    content: str
+
+
+@dataclass(frozen=True)
+class DiscussionSession:
+    """1 論文に対する議論セッション。
+
+    Attributes:
+        session_id: Discord スレッド ID（永続化のキー）。
+        paper_title: 論文タイトル。
+        paper_text: プロンプトに渡す論文本文（取得済みテキスト）。
+        persona_keys: 参加ペルソナのキー（発言順）。
+        turns: これまでの発言列。
+        status: ``active`` / ``idle`` / ``done``。
+    """
+
+    session_id: str
+    paper_title: str
+    paper_text: str
+    persona_keys: tuple[str, ...]
+    turns: tuple[Turn, ...] = field(default_factory=tuple)
+    status: str = STATUS_ACTIVE
+
+
+def add_turn(session: DiscussionSession, turn: Turn) -> DiscussionSession:
+    """発言を 1 つ追加した新しいセッションを返す。"""
+    return replace(session, turns=(*session.turns, turn))
+
+
+def set_status(session: DiscussionSession, status: str) -> DiscussionSession:
+    """ステータスを更新した新しいセッションを返す。"""
+    return replace(session, status=status)

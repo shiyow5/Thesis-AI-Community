@@ -34,6 +34,9 @@ class SessionStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._path = str(db_path)
+        parent = Path(self._path).parent
+        if parent and not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:

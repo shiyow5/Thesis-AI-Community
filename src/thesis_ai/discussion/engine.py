@@ -61,6 +61,11 @@ class DiscussionEngine:
         self._max_tokens = max_tokens
         self._max_paper_chars = max_paper_chars
 
+    @property
+    def persona_keys(self) -> tuple[str, ...]:
+        """登録ペルソナのキー（発言順）。"""
+        return tuple(self._personas)
+
     def _build_messages(self, session: DiscussionSession, persona: Persona) -> list[Message]:
         system = compose_system(persona, session, max_paper_chars=self._max_paper_chars)
         messages = [Message(role="system", content=system)]

@@ -33,7 +33,11 @@ _DAILY_TIME = datetime.time(hour=9, minute=0)
 
 
 def build_router(settings: Settings, http_client: httpx.AsyncClient) -> LLMRouter:
-    """Gemma 4（主力）→ Gemini Flash-Lite（品質補完）→ ローカル（任意）のチェーンを構成する。"""
+    """フォールバックチェーンを構成する。
+
+    コスト最小化のため Gemma 4（主力）→ ローカル（API 枠を消費しない）→ Gemini Flash-Lite
+    （最後の砦）の順とする。ローカル未設定時は Gemma 4 → Flash-Lite。
+    """
     gemma = GeminiClient(api_key=settings.gemini_api_key, model=settings.gemma_model)
     # Flash 系は thinking を無効化（長文入力時に思考トークンが出力枠を食い潰すのを防ぐ）
     flash = GeminiClient(
@@ -45,11 +49,6 @@ def build_router(settings: Settings, http_client: httpx.AsyncClient) -> LLMRoute
             client=gemma,
             limiter=SlidingRateLimiter(max_per_minute=_GEMMA_RPM, max_per_day=_GEMMA_RPD),
         ),
-        RoutedModel(
-            name=settings.flash_model,
-            client=flash,
-            limiter=SlidingRateLimiter(max_per_minute=_FLASH_RPM, max_per_day=_FLASH_RPD),
-        ),
     ]
     if settings.local_llm_model:
         local = LocalLLMClient(
@@ -57,6 +56,7 @@ def build_router(settings: Settings, http_client: httpx.AsyncClient) -> LLMRoute
             base_url=settings.local_llm_base_url,
             model=settings.local_llm_model,
         )
+        # ローカルは API 枠を消費しないため Flash-Lite より優先（コスト優先）
         chain.append(
             RoutedModel(
                 name="local",
@@ -64,6 +64,13 @@ def build_router(settings: Settings, http_client: httpx.AsyncClient) -> LLMRoute
                 limiter=SlidingRateLimiter(max_per_minute=_LOCAL_RPM, max_per_day=_LOCAL_RPD),
             )
         )
+    chain.append(
+        RoutedModel(
+            name=settings.flash_model,
+            client=flash,
+            limiter=SlidingRateLimiter(max_per_minute=_FLASH_RPM, max_per_day=_FLASH_RPD),
+        )
+    )
     return LLMRouter(chain)
 
 

@@ -38,6 +38,20 @@ async def test_generate_returns_text_and_uses_model() -> None:
     assert gen.await_args.kwargs["model"] == "gemma-4"
     # system メッセージは contents から除外される
     assert len(gen.await_args.kwargs["contents"]) == 1
+    # thinking_budget 未指定なら thinking_config は付かない
+    assert gen.await_args.kwargs["config"].thinking_config is None
+
+
+async def test_thinking_budget_disables_thinking() -> None:
+    client, gen = _fake_client(text="ok")
+    gemini = GeminiClient(api_key="x", model="gemini-2.5-flash", client=client, thinking_budget=0)
+
+    await gemini.generate(_MSGS)
+
+    assert gen.await_args is not None
+    config = gen.await_args.kwargs["config"]
+    assert config.thinking_config is not None
+    assert config.thinking_config.thinking_budget == 0
 
 
 async def test_empty_response_raises_llm_error() -> None:

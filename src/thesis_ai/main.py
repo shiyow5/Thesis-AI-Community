@@ -21,9 +21,9 @@ from thesis_ai.llm.router import LLMRouter, RoutedModel, SlidingRateLimiter
 
 logger = logging.getLogger(__name__)
 
-# 無料枠の保守的な既定値（実値は AI Studio で確認のうえ調整）
-_GEMMA_RPM, _GEMMA_RPD = 10, 1400
-_FLASH_RPM, _FLASH_RPD = 10, 240
+# 無料枠の既定値（実値は AI Studio で確認のうえ調整）。超過時は router が次段へ退避する
+_GEMMA_RPM, _GEMMA_RPD = 30, 1400
+_FLASH_RPM, _FLASH_RPD = 15, 240
 # ローカルは枠制限が無いため十分大きい値を設定
 _LOCAL_RPM, _LOCAL_RPD = 1000, 1_000_000
 
@@ -34,7 +34,10 @@ _DAILY_TIME = datetime.time(hour=9, minute=0)
 def build_router(settings: Settings, http_client: httpx.AsyncClient) -> LLMRouter:
     """Gemma 4（主力）→ Gemini Flash（品質補完）→ ローカル（任意）のチェーンを構成する。"""
     gemma = GeminiClient(api_key=settings.gemini_api_key, model=settings.gemma_model)
-    flash = GeminiClient(api_key=settings.gemini_api_key, model=settings.flash_model)
+    # Flash は thinking を無効化（長文入力時に思考トークンが出力枠を食い潰すのを防ぐ）
+    flash = GeminiClient(
+        api_key=settings.gemini_api_key, model=settings.flash_model, thinking_budget=0
+    )
     chain = [
         RoutedModel(
             name="gemma-4",

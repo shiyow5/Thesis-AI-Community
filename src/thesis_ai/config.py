@@ -35,7 +35,8 @@ class Settings(BaseSettings):
     # --- LLM モデル名 ---
     # Gemini API 上の Gemma 4 は gemma-4-31b-it / gemma-4-26b-a4b-it（27b は存在しない）
     gemma_model: str = "gemma-4-31b-it"
-    flash_model: str = "gemini-2.5-flash"
+    # フォールバックは無料枠の大きい Flash-Lite（~1,000 RPD）
+    flash_model: str = "gemini-2.5-flash-lite"
 
     # --- 議論ポリシー ---
     discussion_max_rounds: int = 4

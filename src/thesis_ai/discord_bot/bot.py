@@ -5,6 +5,7 @@
 割り込み応答（Phase 7）も on_message を起点に拡張する。
 """
 
+import asyncio
 import datetime
 import logging
 from collections.abc import Awaitable, Callable
@@ -19,7 +20,9 @@ from thesis_ai.discord_bot.scheduler import create_daily_task, run_daily_discuss
 from thesis_ai.discord_bot.targets import DiscordThreadTarget
 from thesis_ai.discord_bot.webhooks import PersonaWebhookPoster
 from thesis_ai.discussion.engine import DiscussionEngine
+from thesis_ai.discussion.session import add_turn
 from thesis_ai.discussion.store import SessionStore
+from thesis_ai.personas import get_persona
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,7 @@ class ThesisBot(discord.Client):
         self.context = context
         self.tree = discord.app_commands.CommandTree(self)
         self._daily_started = False
+        self._interrupt_locks: dict[str, asyncio.Lock] = {}
 
     async def setup_hook(self) -> None:
         await self.tree.sync()
@@ -95,14 +99,41 @@ class ThesisBot(discord.Client):
         if message.author.bot or message.webhook_id is not None:
             return
 
+        # 議論スレッド内のユーザー発言 → 割り込み応答（モードの途中でも答える）
+        if isinstance(message.channel, discord.Thread):
+            session = self.context.store.load(str(message.channel.id))
+            if session is not None and message.content.strip():
+                self.loop.create_task(
+                    self._handle_interrupt(str(message.channel.id), message.content.strip())
+                )
+            return
+
+        # 通常チャンネルへの arXiv URL/ID 投稿 → オンデマンド議論を開始
+        if not isinstance(message.channel, discord.TextChannel):
+            return
         query = detect_paper_query(message.content)
         if query is None:
             return
-        if not isinstance(message.channel, discord.TextChannel):
-            return
-
         target = DiscordThreadTarget(message.channel)
         self.loop.create_task(self._start_discussion(target, query))
+
+    async def _handle_interrupt(self, thread_id: str, text: str) -> None:
+        # 同一スレッドへの割り込みは直列化し、応答が交錯しないようにする
+        lock = self._interrupt_locks.setdefault(thread_id, asyncio.Lock())
+        async with lock:
+            session = self.context.store.load(thread_id)
+            if session is None:
+                return
+            try:
+                turn = await self.context.engine.answer_interrupt(session, text)
+            except Exception:
+                logger.exception("割り込み応答の生成に失敗しました (thread=%s)", thread_id)
+                return
+            session = add_turn(session, turn)
+            self.context.store.save(session)
+            persona = get_persona(turn.persona_key)
+            if persona is not None:
+                await self.context.poster.post(persona, turn.content, thread_id=thread_id)
 
     async def _start_discussion(self, target: ThreadTarget, query: str) -> None:
         try:

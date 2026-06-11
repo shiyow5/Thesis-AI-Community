@@ -6,6 +6,8 @@ Discord 依存（スレッド作成）は ``ThreadTarget`` プロトコルで抽
 
 from typing import Protocol
 
+import httpx
+
 from thesis_ai.discussion.engine import DiscussionEngine
 from thesis_ai.discussion.session import (
     STATUS_IDLE,
@@ -13,10 +15,19 @@ from thesis_ai.discussion.session import (
     set_status,
 )
 from thesis_ai.discussion.store import SessionStore
+from thesis_ai.papers.fetch import fetch_paper_text
 from thesis_ai.papers.models import Paper
 from thesis_ai.personas import Persona, get_persona
 
 _THREAD_NAME_LIMIT = 100
+
+
+async def fetch_text_for(http_client: httpx.AsyncClient, paper: Paper) -> str:
+    """論文の本文テキストを取得する。取得できなければ要約/アブストラクトにフォールバックする。"""
+    text = ""
+    if paper.arxiv_id:
+        text = await fetch_paper_text(http_client, paper.arxiv_id) or ""
+    return text or paper.ai_summary or paper.abstract or paper.title
 
 
 class ThreadTarget(Protocol):

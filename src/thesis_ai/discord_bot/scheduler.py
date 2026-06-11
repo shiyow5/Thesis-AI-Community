@@ -12,11 +12,15 @@ from typing import Any
 import httpx
 from discord.ext import tasks
 
-from thesis_ai.discord_bot.runner import PosterTarget, ThreadTarget, run_discussion
+from thesis_ai.discord_bot.runner import (
+    PosterTarget,
+    ThreadTarget,
+    fetch_text_for,
+    run_discussion,
+)
 from thesis_ai.discussion.engine import DiscussionEngine
 from thesis_ai.discussion.session import DiscussionSession
 from thesis_ai.discussion.store import SessionStore
-from thesis_ai.papers.fetch import fetch_paper_text
 from thesis_ai.papers.trending import fetch_trending_papers, pick_top_paper
 
 logger = logging.getLogger(__name__)
@@ -41,12 +45,7 @@ async def run_daily_discussion(
         logger.warning("トレンド論文を取得できませんでした")
         return None
 
-    paper_text = ""
-    if paper.arxiv_id:
-        paper_text = await fetch_paper_text(http_client, paper.arxiv_id) or ""
-    if not paper_text:
-        paper_text = paper.ai_summary or paper.abstract or paper.title
-
+    paper_text = await fetch_text_for(http_client, paper)
     logger.info("本日の論文: %s (%s)", paper.title, paper.arxiv_id)
     return await run_discussion(
         paper,

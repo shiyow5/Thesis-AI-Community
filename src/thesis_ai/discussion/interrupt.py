@@ -32,3 +32,11 @@ def parse_persona_key(text: str, valid_keys: list[str]) -> str:
         if key in lowered:
             return key
     return valid_keys[0]
+
+
+def parse_affirmative(text: str) -> bool:
+    """LLM の はい/いいえ 出力を解釈する。判別できなければ False（=継続）を返す。"""
+    lowered = text.strip().lower()
+    if "いいえ" in lowered:
+        return False
+    return "はい" in lowered or "yes" in lowered

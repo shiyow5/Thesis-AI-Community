@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     gemma_model: str = "gemma-4-27b-it"
     flash_model: str = "gemini-2.5-flash"
 
+    # --- 議論ポリシー ---
+    discussion_max_rounds: int = 4
+
     # --- ローカルフォールバック ---
     local_llm_base_url: str = "http://localhost:1234/v1"
     local_llm_model: str | None = None

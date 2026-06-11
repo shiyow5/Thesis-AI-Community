@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     webhook_layperson: str | None = None
 
     # --- LLM モデル名 ---
-    gemma_model: str = "gemma-4-27b-it"
+    # Gemini API 上の Gemma 4 は gemma-4-31b-it / gemma-4-26b-a4b-it（27b は存在しない）
+    gemma_model: str = "gemma-4-31b-it"
     flash_model: str = "gemini-2.5-flash"
 
     # --- 議論ポリシー ---

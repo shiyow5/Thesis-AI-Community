@@ -30,7 +30,7 @@
 
 | 役割 | モデル | 経由 | 無料枠(free tier) | コンテキスト | 用途 |
 |---|---|---|---|---|---|
-| **メイン** | **Gemma 4 (27B)** | Gemini API | **~1,500 RPD**（複数情報源, 要AI Studio実値確認） | 1M | 議論ターンの大量生成。Apache 2.0・多言語SOTA級 |
+| **メイン** | **Gemma 4 (31B, `gemma-4-31b-it`)** | Gemini API | **~1,500 RPD**（複数情報源, 要AI Studio実値確認） | 1M | 議論ターンの大量生成。Apache 2.0・多言語SOTA級。※ API 上のIDは `gemma-4-31b-it` / `gemma-4-26b-a4b-it`（27b は存在しない） |
 | **品質補完** | **Gemini 2.5 Flash** | Gemini API | 250 RPD / Flash-Lite 1,000 RPD（2025/12削減後） | 1M | 議論の要約・割り込みの的確な回答など品質重視ポイント限定 |
 | **フォールバック** | ローカル(Gemma 4 or LFM2軽量) | LM Studio/Ollama OpenAI互換 | 無制限(電気代のみ) | 32K〜 | API枯渇/障害時の縮退運転 |
 

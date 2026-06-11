@@ -5,6 +5,7 @@ description = "Discord AI personas that discuss academic papers to aid understan
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "discord-py>=2.7.1",
     "google-genai>=2.8.0",
     "httpx>=0.28.1",
     "pydantic-settings>=2.7",
@@ -51,3 +52,7 @@ follow_imports = "skip"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "--cov=thesis_ai --cov-report=term-missing"
+filterwarnings = [
+    # discord.py が内部で import する audioop の非推奨警告（音声機能は未使用）
+    "ignore:'audioop' is deprecated:DeprecationWarning",
+]

@@ -5,6 +5,7 @@ description = "Discord AI personas that discuss academic papers to aid understan
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "google-genai>=2.8.0",
     "httpx>=0.28.1",
     "pydantic-settings>=2.7",
     "pymupdf>=1.27.2.3",

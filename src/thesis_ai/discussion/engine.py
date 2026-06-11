@@ -167,8 +167,8 @@ class DiscussionEngine:
         prompt = (
             f"{history_block}"
             f"参加者への質問: {user_message}\n\n"
-            f"あなた（{persona.display_name}）として、この質問に日本語で最後まで分かりやすく"
-            "答えてください。"
+            f"あなた（{persona.display_name}）として、この質問に日本語で答えてください。"
+            "会話なのでできるだけ簡潔に。長くても300字程度に収め、途中で切らず最後まで答えきること。"
         )
         text = await self._router.generate(
             [Message(role="system", content=system), Message(role="user", content=prompt)],

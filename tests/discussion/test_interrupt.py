@@ -135,7 +135,8 @@ async def test_answer_interrupt_uses_selected_persona_and_context() -> None:
 
     assert turn.persona_key == "expert"
     assert turn.content == "専門家の回答"
-    # 回答プロンプトに質問と既存の議論履歴が含まれる
+    # 回答プロンプトに質問・既存履歴・文字数指示が含まれる
     answer_prompt = router.calls[1][-1].content
     assert "再現性は？" in answer_prompt
     assert "導入の説明" in answer_prompt
+    assert "字程度" in answer_prompt  # 切れ防止の長さ指示

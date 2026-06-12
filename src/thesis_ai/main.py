@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 # 無料枠の既定値（実値は AI Studio で確認のうえ調整）。超過時は router が次段へ退避する
 _GEMMA_RPM, _GEMMA_RPD = 30, 1400
+# Gemma の TPM(16k トークン/分)超過による 429 は即フォールバックせず待って再試行する。
+# 無料・高品質な Gemma で完結させ、課金(Flash-Lite)やローカルのハルシネーションを避ける。
+# 待機 20 秒 × 最大 3 回 ≒ 最大 60 秒（TPM 窓の回復時間）で諦めて次段へ。
+_GEMMA_RATE_LIMIT_RETRIES = 3
+_GEMMA_RATE_LIMIT_WAIT = 20.0
 # フォールバックは Flash-Lite（無料枠 ~1,000 RPD）
 _FLASH_RPM, _FLASH_RPD = 15, 1000
 # ローカルは枠制限が無いため十分大きい値を設定
@@ -37,6 +42,9 @@ def build_router(settings: Settings, http_client: httpx.AsyncClient) -> LLMRoute
 
     コスト最小化のため Gemma 4（主力）→ ローカル（API 枠を消費しない）→ Gemini Flash-Lite
     （最後の砦）の順とする。ローカル未設定時は Gemma 4 → Flash-Lite。
+
+    Gemma は TPM 超過の 429 でも即フォールバックせず待って再試行するため、通常は無料・
+    高品質な Gemma で完結し、課金(Flash-Lite)やローカルの低品質出力に落ちにくい。
     """
     gemma = GeminiClient(api_key=settings.gemini_api_key, model=settings.gemma_model)
     # Flash 系は thinking を無効化（長文入力時に思考トークンが出力枠を食い潰すのを防ぐ）
@@ -48,6 +56,8 @@ def build_router(settings: Settings, http_client: httpx.AsyncClient) -> LLMRoute
             name="gemma-4",
             client=gemma,
             limiter=SlidingRateLimiter(max_per_minute=_GEMMA_RPM, max_per_day=_GEMMA_RPD),
+            rate_limit_retries=_GEMMA_RATE_LIMIT_RETRIES,
+            rate_limit_wait=_GEMMA_RATE_LIMIT_WAIT,
         ),
     ]
     if settings.local_llm_model:

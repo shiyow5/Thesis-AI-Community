@@ -25,6 +25,11 @@ Sleeper = Callable[[float], Awaitable[None]]
 _SECONDS_PER_MINUTE = 60.0
 _SECONDS_PER_DAY = 86_400.0
 
+# レート制限(429)時に同一モデルを待って再試行する際の既定待機秒と上限。
+# Gemma の TPM(トークン/分)枠は 60 秒で回復するため、その範囲で待ち直す。
+_DEFAULT_RATE_LIMIT_WAIT = 20.0
+_MAX_RATE_LIMIT_WAIT = 60.0
+
 
 class SlidingRateLimiter:
     """分次・日次のスライディングウィンドウによるレート制御。"""
@@ -59,13 +64,26 @@ class SlidingRateLimiter:
         return True
 
 
+def _rate_limit_wait(model: "RoutedModel", exc: RateLimitError) -> float:
+    """429 後に待つ秒数を決める。retry_after を優先し、上限でクランプする。"""
+    wait = exc.retry_after if exc.retry_after is not None else model.rate_limit_wait
+    return min(wait, _MAX_RATE_LIMIT_WAIT)
+
+
 @dataclass
 class RoutedModel:
-    """ルーターのチェーンを構成する 1 モデル。"""
+    """ルーターのチェーンを構成する 1 モデル。
+
+    ``rate_limit_retries`` を 1 以上にすると、429 で即フォールバックせず
+    ``rate_limit_wait`` 秒（``retry_after`` があればそれを優先、上限 60 秒）待って
+    同一モデルを再試行する。無料・高品質な主力モデルを使い切るための設定。
+    """
 
     name: str
     client: LLMClient
     limiter: SlidingRateLimiter
+    rate_limit_retries: int = 0
+    rate_limit_wait: float = _DEFAULT_RATE_LIMIT_WAIT
 
 
 class LLMRouter:
@@ -95,18 +113,26 @@ class LLMRouter:
                 last_error = RateLimitError(f"{model.name}: local rate limit reached")
                 continue
 
-            for attempt in range(self._max_retries + 1):
+            transient_left = self._max_retries
+            rate_limit_left = model.rate_limit_retries
+            while True:
                 try:
                     return await model.client.generate(messages, max_tokens=max_tokens)
                 except RateLimitError as exc:
                     last_error = exc
-                    break  # このモデルは枠切れ → 次のモデルへ
+                    if rate_limit_left <= 0:
+                        break  # 再試行枠を使い切った → 次のモデルへ
+                    rate_limit_left -= 1
+                    await self._sleep(_rate_limit_wait(model, exc))
+                    continue  # TPM 回復を待って同一モデルを再試行
                 except TransientLLMError as exc:
                     last_error = exc
-                    if attempt < self._max_retries:
-                        await self._sleep(self._backoff_base * (2**attempt))
-                        continue
-                    break  # リトライ尽きた → 次のモデルへ
+                    if transient_left <= 0:
+                        break  # リトライ尽きた → 次のモデルへ
+                    attempt = self._max_retries - transient_left
+                    transient_left -= 1
+                    await self._sleep(self._backoff_base * (2**attempt))
+                    continue
                 except LLMError as exc:
                     last_error = exc
                     break  # 非リトライ系 → 次のモデルへ

@@ -120,6 +120,74 @@ async def test_non_retryable_error_falls_back_without_retry() -> None:
     assert primary.calls == 1
 
 
+async def test_retries_on_rate_limit_then_succeeds() -> None:
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    primary = FakeClient(text="recovered", errors=[RateLimitError("429"), RateLimitError("429")])
+    model = RoutedModel(
+        name="a",
+        client=primary,
+        limiter=_open_limiter(),
+        rate_limit_retries=3,
+        rate_limit_wait=20.0,
+    )
+    router = LLMRouter([model], sleep=fake_sleep)
+
+    result = await router.generate(_MSGS)
+
+    assert result == "recovered"
+    assert primary.calls == 3
+    assert slept == [20.0, 20.0]
+
+
+async def test_rate_limit_retry_honors_retry_after_capped() -> None:
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    primary = FakeClient(
+        text="ok",
+        errors=[RateLimitError("429", retry_after=5.0), RateLimitError("429", retry_after=999.0)],
+    )
+    model = RoutedModel(
+        name="a",
+        client=primary,
+        limiter=_open_limiter(),
+        rate_limit_retries=3,
+        rate_limit_wait=20.0,
+    )
+    router = LLMRouter([model], sleep=fake_sleep)
+
+    result = await router.generate(_MSGS)
+
+    assert result == "ok"
+    assert slept == [5.0, 60.0]  # retry_after 優先、ただし 60s で上限
+
+
+async def test_rate_limit_exhausts_retries_then_falls_back() -> None:
+    async def fake_sleep(seconds: float) -> None:
+        return None
+
+    primary = FakeClient(errors=[RateLimitError("429"), RateLimitError("429")])
+    secondary = FakeClient(text="secondary")
+    model = RoutedModel(
+        name="a",
+        client=primary,
+        limiter=_open_limiter(),
+        rate_limit_retries=1,
+    )
+    router = LLMRouter([model, _model("b", secondary)], sleep=fake_sleep)
+
+    result = await router.generate(_MSGS)
+
+    assert result == "secondary"
+    assert primary.calls == 2
+
+
 async def test_raises_when_all_models_fail() -> None:
     primary = FakeClient(errors=[RateLimitError("429")])
     secondary = FakeClient(errors=[LLMError("boom")])

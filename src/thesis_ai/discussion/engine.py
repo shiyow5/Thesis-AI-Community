@@ -14,6 +14,7 @@ from thesis_ai.discussion.interrupt import (
     parse_next_speaker,
     parse_persona_key,
     parse_reply_marker,
+    strip_at_sigils,
 )
 from thesis_ai.discussion.session import DiscussionSession, Turn
 from thesis_ai.llm.base import Message
@@ -150,6 +151,8 @@ class DiscussionEngine:
         for persona in self._personas.values():
             aliases[persona.key] = persona.key
             aliases[persona.display_name] = persona.key
+            for alias in persona.aliases:
+                aliases[alias] = persona.key
         return aliases
 
     async def generate_turn(self, session: DiscussionSession, persona_key: str) -> Turn:
@@ -159,7 +162,9 @@ class DiscussionEngine:
             self._build_messages(session, persona),
             max_tokens=self._max_tokens,
         )
-        marker_key, content = parse_reply_marker(raw, self._reply_aliases())
+        aliases = self._reply_aliases()
+        marker_key, content = parse_reply_marker(raw, aliases)
+        content = strip_at_sigils(content, aliases)
         reply_to = None
         if marker_key is not None and marker_key != persona_key:
             reply_to = _latest_index(session, marker_key)
@@ -256,4 +261,5 @@ class DiscussionEngine:
             [Message(role="system", content=system), Message(role="user", content=prompt)],
             max_tokens=self._interrupt_max_tokens,
         )
-        return Turn(persona_key=persona_key, content=text.strip())
+        content = strip_at_sigils(text.strip(), self._reply_aliases())
+        return Turn(persona_key=persona_key, content=content.strip())

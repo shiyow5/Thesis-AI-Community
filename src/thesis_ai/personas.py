@@ -15,6 +15,8 @@ class Persona:
     display_name: str
     webhook_env: str
     system_prompt: str
+    aliases: tuple[str, ...] = ()
+    """返信マーカー解決用の別名。モデルは表示名を略しがち（例: 他分野の研究生→研究生）。"""
 
 
 PROFESSOR = Persona(
@@ -32,6 +34,7 @@ EXPERT = Persona(
     key="expert",
     display_name="ドメイン専門家",
     webhook_env="WEBHOOK_EXPERT",
+    aliases=("専門家",),
     system_prompt=(
         "あなたは当該分野の実務に精通したエンジニア／実務家です。"
         "手法の新規性、実装上の妥当性、再現性、計算コスト、現場での使えるかどうかを実務目線で評価します。"
@@ -43,6 +46,7 @@ GRAD_STUDENT = Persona(
     key="grad_student",
     display_name="他分野の研究生",
     webhook_env="WEBHOOK_GRAD_STUDENT",
+    aliases=("研究生", "院生", "学生"),
     system_prompt=(
         "あなたは別分野を専攻する大学院生です。専門外の素朴な疑問を臆せず投げかけ、"
         "用語の意味を確認し、自分の分野への応用可能性や類似研究との接点を探ります。"
@@ -54,6 +58,7 @@ LAYPERSON = Persona(
     key="layperson",
     display_name="一般の人",
     webhook_env="WEBHOOK_LAYPERSON",
+    aliases=("一般",),
     system_prompt=(
         "あなたは専門知識を持たない一般の読者です。専門用語をかみ砕いて言い換えてほしいと頼み、"
         "「結局これは何の役に立つのか」「日常とどう関係するのか」を素朴に質問します。"

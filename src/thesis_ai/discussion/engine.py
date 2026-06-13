@@ -5,9 +5,12 @@
 全体への発言かを自分で示す。
 """
 
+import logging
+
 from thesis_ai.discussion.interrupt import (
     build_next_speaker_messages,
     build_selector_messages,
+    is_done_signal,
     parse_next_speaker,
     parse_persona_key,
     parse_reply_marker,
@@ -17,12 +20,18 @@ from thesis_ai.llm.base import Message
 from thesis_ai.llm.router import LLMRouter
 from thesis_ai.personas import DEFAULT_PERSONAS, Persona
 
+logger = logging.getLogger(__name__)
+
 # 要約生成に渡す論文本文の上限。Gemma 無料枠の入力 16,000 tokens/分 に収まる範囲に抑える
 _DEFAULT_MAX_PAPER_CHARS = 48_000
 _DEFAULT_MAX_TURNS = 20
 _DEFAULT_MAX_TOKENS = 1024
 _DEFAULT_INTERRUPT_MAX_TOKENS = 1536
 _SUMMARY_MAX_TOKENS = 2048
+# 司会選定・回答者選定の出力上限。主力 Gemma 4 は思考(thinking)モデルで、可視出力の前に
+# 思考トークンを消費する。16 程度だと思考だけで使い切り可視テキストが空になり
+# フォールバックを誘発するため、思考＋短い回答が収まる余裕を持たせる。
+_SELECT_MAX_TOKENS = 512
 
 _SUMMARY_SYSTEM = "あなたは論文を分かりやすく日本語で要約する専門家です。"
 _SUMMARY_INSTRUCTION = (
@@ -170,9 +179,29 @@ class DiscussionEngine:
         history = format_history(session.turns, self._personas)
         raw = await self._router.generate(
             build_next_speaker_messages(personas, history),
-            max_tokens=16,
+            max_tokens=_SELECT_MAX_TOKENS,
         )
-        return parse_next_speaker(raw, [p.key for p in personas])
+        n = len(session.turns)
+        chosen = parse_next_speaker(raw, [p.key for p in personas])
+        if chosen is not None:
+            logger.info("司会選定: raw=%r -> %s (turn数=%d)", raw.strip(), chosen, n)
+            return chosen
+        if is_done_signal(raw):
+            logger.info("司会選定: raw=%r -> 終了 (turn数=%d)", raw.strip(), n)
+            return None
+        # キーも DONE も取れない解析不能・空応答では議論を終わらせず継続する。
+        fallback = self._round_robin(session, personas)
+        logger.warning(
+            "司会選定が解析不能 raw=%r -> ラウンドロビンで %s (turn数=%d)", raw.strip(), fallback, n
+        )
+        return fallback
+
+    def _round_robin(self, session: DiscussionSession, personas: tuple[Persona, ...]) -> str:
+        """最も長く発言していない（または未発言の）ペルソナのキーを返す。"""
+        last_idx: dict[str, int] = {}
+        for i, turn in enumerate(session.turns):
+            last_idx[turn.persona_key] = i
+        return min((p.key for p in personas), key=lambda k: last_idx.get(k, -1))
 
     async def next_turn(self, session: DiscussionSession) -> Turn | None:
         """司会判断で次の発言者を選び、その発言を生成する。終了なら None。"""
@@ -186,7 +215,7 @@ class DiscussionEngine:
         personas = self._active_personas(session)
         raw = await self._router.generate(
             build_selector_messages(personas, user_message),
-            max_tokens=16,
+            max_tokens=_SELECT_MAX_TOKENS,
         )
         return parse_persona_key(raw, [p.key for p in personas])
 

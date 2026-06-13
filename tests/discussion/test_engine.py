@@ -140,6 +140,34 @@ async def test_select_next_speaker_done_returns_none() -> None:
     assert await engine.select_next_speaker(_session()) is None
 
 
+async def test_select_next_speaker_round_robin_on_unparseable() -> None:
+    # キーも DONE も含まない解析不能な出力では、議論を終了させずに継続する
+    # （弱いフォールバックモデルが司会選定に失敗しても議論を殺さない）。
+    engine = DiscussionEngine(ScriptedRouter(["???"]))  # type: ignore[arg-type]
+    result = await engine.select_next_speaker(_session())
+    assert result in ("professor", "layperson")
+
+
+async def test_select_next_speaker_round_robin_on_empty() -> None:
+    # 空応答（思考モデルが max_tokens を使い切るケース）でも継続する。
+    engine = DiscussionEngine(ScriptedRouter([""]))  # type: ignore[arg-type]
+    result = await engine.select_next_speaker(_session())
+    assert result in ("professor", "layperson")
+
+
+async def test_select_next_speaker_round_robin_prefers_least_recent() -> None:
+    engine = DiscussionEngine(ScriptedRouter(["解析不能"]))  # type: ignore[arg-type]
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="b",
+        persona_keys=("professor", "layperson"),
+        turns=(Turn(persona_key="professor", content="A"),),
+    )
+    # professor が直近に発言済み → 未発言の layperson を選ぶ
+    assert await engine.select_next_speaker(session) == "layperson"
+
+
 async def test_next_turn_selects_then_generates() -> None:
     # 1 回目=司会の選択(expert), 2 回目=発言本文
     router = ScriptedRouter(["expert", "専門家の発言"])

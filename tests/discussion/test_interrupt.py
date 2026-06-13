@@ -4,6 +4,7 @@ from thesis_ai.discussion.engine import DiscussionEngine
 from thesis_ai.discussion.interrupt import (
     build_next_speaker_messages,
     build_selector_messages,
+    is_done_signal,
     parse_next_speaker,
     parse_persona_key,
     parse_reply_marker,
@@ -50,6 +51,18 @@ def test_parse_next_speaker_returns_key() -> None:
     keys = ["professor", "expert", "grad_student", "layperson"]
     assert parse_next_speaker("expert", keys) == "expert"
     assert parse_next_speaker("  Layperson です\n", keys) == "layperson"
+
+
+def test_is_done_signal_detects_done() -> None:
+    assert is_done_signal("DONE")
+    assert is_done_signal("done")
+    assert is_done_signal("もう十分なので DONE です")
+
+
+def test_is_done_signal_false_for_other_text() -> None:
+    assert not is_done_signal("professor")
+    assert not is_done_signal("???")
+    assert not is_done_signal("")
 
 
 def test_parse_next_speaker_done_or_unknown_returns_none() -> None:

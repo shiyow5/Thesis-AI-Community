@@ -25,6 +25,16 @@ NEXT_SPEAKER_SYSTEM = (
 )
 
 _REPLY_MARKER_RE = re.compile(r"^\s*@(\w+)\b[\s:、,]*")
+_DONE_RE = re.compile(r"\bdone\b", re.IGNORECASE)
+
+
+def is_done_signal(text: str) -> bool:
+    """司会の出力が議論の終了（DONE）を示すかを判定する。
+
+    有効なペルソナキーが取れなかったときに、「終了の意思表示」と「単なる解析不能」を
+    区別するために使う。前者は議論を終え、後者は継続（ラウンドロビン）させる。
+    """
+    return bool(_DONE_RE.search(text))
 
 
 def _roster(personas: tuple[Persona, ...]) -> str:

@@ -14,7 +14,6 @@ from thesis_ai.discussion.interrupt import (
     parse_next_speaker,
     parse_persona_key,
     parse_reply_marker,
-    strip_at_sigils,
 )
 from thesis_ai.discussion.session import DiscussionSession, Turn
 from thesis_ai.llm.base import Message
@@ -162,9 +161,7 @@ class DiscussionEngine:
             self._build_messages(session, persona),
             max_tokens=self._max_tokens,
         )
-        aliases = self._reply_aliases()
-        marker_key, content = parse_reply_marker(raw, aliases)
-        content = strip_at_sigils(content, aliases)
+        marker_key, content = parse_reply_marker(raw, self._reply_aliases())
         reply_to = None
         if marker_key is not None and marker_key != persona_key:
             reply_to = _latest_index(session, marker_key)
@@ -261,5 +258,4 @@ class DiscussionEngine:
             [Message(role="system", content=system), Message(role="user", content=prompt)],
             max_tokens=self._interrupt_max_tokens,
         )
-        content = strip_at_sigils(text.strip(), self._reply_aliases())
-        return Turn(persona_key=persona_key, content=content.strip())
+        return Turn(persona_key=persona_key, content=text.strip())

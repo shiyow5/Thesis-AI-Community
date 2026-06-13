@@ -8,7 +8,6 @@ from thesis_ai.discussion.interrupt import (
     parse_next_speaker,
     parse_persona_key,
     parse_reply_marker,
-    strip_at_sigils,
 )
 from thesis_ai.discussion.session import DiscussionSession, Turn
 from thesis_ai.llm.base import Message
@@ -84,43 +83,32 @@ def test_build_next_speaker_messages_lists_personas() -> None:
 _ALIASES = {"professor": "professor", "教授": "professor", "expert": "expert", "専門家": "expert"}
 
 
-def test_parse_reply_marker_extracts_key() -> None:
+def test_parse_reply_marker_detects_target_keeps_body() -> None:
+    # 返信先は検出するが、本文は原文のまま（@名前を残す）。
     target, body = parse_reply_marker("@professor それは違います", _ALIASES)
     assert target == "professor"
-    assert body == "それは違います"
+    assert body == "@professor それは違います"
 
 
 def test_parse_reply_marker_accepts_display_name() -> None:
     target, body = parse_reply_marker("@教授\nそれは違います", _ALIASES)
     assert target == "professor"
-    assert body == "それは違います"
+    assert body == "@教授\nそれは違います"
 
 
-def test_parse_reply_marker_tolerates_honorific() -> None:
+def test_parse_reply_marker_detects_with_honorific() -> None:
     aliases = {"他分野の研究生": "grad_student", "教授": "professor"}
     target, body = parse_reply_marker("@他分野の研究生さん、鋭い質問ですね。", aliases)
     assert target == "grad_student"
-    assert body == "鋭い質問ですね。"
-
-
-def test_parse_reply_marker_strips_address_with_space_and_honorific() -> None:
-    # 純粋な宛先指定「@表示名 さん、…」は名前ごと除去する。
-    aliases = {"他分野の研究生": "grad_student", "一般の人": "layperson"}
-    target, body = parse_reply_marker("@他分野の研究生 さん、ありがとうございます。", aliases)
-    assert target == "grad_student"
-    assert body == "ありがとうございます。"
+    assert body == "@他分野の研究生さん、鋭い質問ですね。"
 
 
 def test_parse_reply_marker_keeps_name_when_in_sentence() -> None:
-    # 文中参照（@名前さん + 助詞）は名前を本文に残す。除去すると主語が消えて崩れる。
+    # 文中参照（@名前さん + 助詞）でも本文は原文のまま、返信先だけ検出する。
     aliases = {"他分野の研究生": "grad_student", "ドメイン専門家": "expert"}
     target, body = parse_reply_marker("@他分野の研究生 さんの例えを聞いて、なるほど", aliases)
     assert target == "grad_student"
-    assert body == "他分野の研究生さんの例えを聞いて、なるほど"
-
-    target2, body2 = parse_reply_marker("@ドメイン専門家 さんが指摘された点", aliases)
-    assert target2 == "expert"
-    assert body2 == "ドメイン専門家さんが指摘された点"
+    assert body == "@他分野の研究生 さんの例えを聞いて、なるほど"
 
 
 def test_parse_reply_marker_resolves_abbreviated_name() -> None:
@@ -133,26 +121,11 @@ def test_parse_reply_marker_resolves_abbreviated_name() -> None:
     }
     target, body = parse_reply_marker("@研究生さん、なるほど", aliases)
     assert target == "grad_student"
-    assert body == "なるほど"
+    assert body == "@研究生さん、なるほど"
 
     target2, body2 = parse_reply_marker("@専門家 それは違います", aliases)
     assert target2 == "expert"
-    assert body2 == "それは違います"
-
-
-def test_strip_at_sigils_removes_mid_text_mentions() -> None:
-    # 文中（先頭以外）に残る @名前 の @ 記号だけを落とし、名前は残す。
-    aliases = {"他分野の研究生": "grad_student", "教授": "professor"}
-    text = "結論として、@他分野の研究生 さんがおっしゃる通り重要です。"
-    assert (
-        strip_at_sigils(text, aliases)
-        == "結論として、他分野の研究生 さんがおっしゃる通り重要です。"
-    )
-
-
-def test_strip_at_sigils_noop_without_mentions() -> None:
-    aliases = {"教授": "professor"}
-    assert strip_at_sigils("普通の発言です。", aliases) == "普通の発言です。"
+    assert body2 == "@専門家 それは違います"
 
 
 def test_parse_reply_marker_none_when_no_marker() -> None:

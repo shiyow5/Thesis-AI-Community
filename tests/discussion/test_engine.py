@@ -258,7 +258,7 @@ async def test_generate_turn_parses_reply_marker() -> None:
     turn = await engine.generate_turn(session, "expert")
 
     assert turn.reply_to == 0  # professor の発言（index 0）への返信
-    assert turn.content == "なるほど、その点に補足します。"  # マーカー除去済み
+    assert turn.content == "@professor なるほど、その点に補足します。"  # 本文は原文のまま
 
 
 async def test_generate_turn_ignores_self_reply_marker() -> None:

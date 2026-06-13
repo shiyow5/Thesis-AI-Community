@@ -82,13 +82,6 @@ def parse_next_speaker(text: str, valid_keys: list[str]) -> str | None:
     return None
 
 
-_HONORIFICS = ("さん", "さま", "様", "氏", "先生", "くん", "君", "ちゃん")
-_HONORIFIC_HEAD_RE = re.compile(rf"^(?:{'|'.join(_HONORIFICS)})")
-# ``@名前`` の直後にこれらの助詞が続く場合、名前は文の構成要素（主語等）なので本文に残す。
-_PARTICLES = ("の", "が", "は", "を", "に", "へ", "と", "も", "で", "や", "から", "まで", "より")
-_SEPARATORS = " 　:：、,。\n\t"
-
-
 def _longest_leading_alias(text: str, aliases: dict[str, str]) -> str | None:
     """``text`` の先頭に一致する最長のエイリアス名を返す（無ければ None）。"""
     best: str | None = None
@@ -99,45 +92,19 @@ def _longest_leading_alias(text: str, aliases: dict[str, str]) -> str | None:
 
 
 def parse_reply_marker(text: str, aliases: dict[str, str]) -> tuple[str | None, str]:
-    """先頭の ``@名前`` 返信マーカーを解析し、(対象ペルソナキー, 整形後の本文) を返す。
+    """先頭の ``@名前`` メンションから返信先ペルソナを検出する。
 
-    モデルはメンションを 2 通りに使う:
-    - 純粋な宛先指定（例: ``@教授、…`` / ``@研究生さん\n…``）→ 名前ごと本文から除去する。
-    - 文中の参照（例: ``@研究生さんの例えを聞いて…``）→ 名前は文法上必要なので本文に残し、
-      ``@`` 記号のみ除去する。直後が助詞なら後者と判定する。
+    本文は加工せず原文のまま返し（``@名前`` は残す）、誰への返信かだけを判定する。
+    検出結果は引用ブロック表示（reply_to）に使う。
 
-    ``aliases`` はキー/表示名/略称 → ペルソナキーの対応。
+    ``aliases`` はキー/表示名/略称 → ペルソナキーの対応。略称・敬称付き
+    （例: ``@研究生さん``）でも、エイリアスが先頭一致すれば検出できる。
     """
+    body = text.strip()
     stripped = text.lstrip()
     if not stripped.startswith("@"):
-        return None, text.strip()
-
-    after_at = stripped[1:]
-    name = _longest_leading_alias(after_at, aliases)
+        return None, body
+    name = _longest_leading_alias(stripped[1:], aliases)
     if name is None:
-        return None, text.strip()
-    key = aliases[name]
-
-    rest = after_at[len(name) :].lstrip(" 　")
-    honorific_match = _HONORIFIC_HEAD_RE.match(rest)
-    honorific = honorific_match.group(0) if honorific_match else ""
-    tail = rest[len(honorific) :]
-
-    if any(tail.startswith(p) for p in _PARTICLES):
-        # 文中参照: 名前＋敬称を残し、@ と名前間の空白だけ正規化する。
-        return key, (name + honorific + tail).strip()
-    # 宛先指定: 名前・敬称・区切りをまとめて除去する。
-    return key, tail.lstrip(_SEPARATORS).strip()
-
-
-def strip_at_sigils(text: str, aliases: dict[str, str]) -> str:
-    """本文中に残った ``@名前`` の ``@`` 記号だけを除去する（名前は残す）。
-
-    先頭以外（文中）のメンションは返信マーカー解析の対象外で ``@`` が残るため、
-    ``@他分野の研究生 さん`` → ``他分野の研究生 さん`` のように記号のみ整える。
-    長い名前を優先して置換し、部分一致での取りこぼしを防ぐ。
-    """
-    for name in sorted(aliases, key=len, reverse=True):
-        if name:
-            text = text.replace(f"@{name}", name)
-    return text
+        return None, body
+    return aliases[name], body

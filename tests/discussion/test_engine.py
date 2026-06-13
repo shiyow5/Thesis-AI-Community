@@ -135,9 +135,90 @@ async def test_select_next_speaker_returns_key() -> None:
     assert await engine.select_next_speaker(_session()) == "layperson"
 
 
-async def test_select_next_speaker_done_returns_none() -> None:
+def _all_spoke_session() -> DiscussionSession:
+    """全ペルソナが 1 回ずつ発言済みのセッション。"""
+    return DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="b",
+        persona_keys=("professor", "layperson"),
+        turns=(
+            Turn(persona_key="professor", content="A"),
+            Turn(persona_key="layperson", content="B"),
+        ),
+    )
+
+
+async def test_select_next_speaker_done_returns_none_after_all_spoke() -> None:
     engine = DiscussionEngine(ScriptedRouter(["DONE"]))  # type: ignore[arg-type]
-    assert await engine.select_next_speaker(_session()) is None
+    assert await engine.select_next_speaker(_all_spoke_session()) is None
+
+
+async def test_select_next_speaker_forces_unspoken_before_done() -> None:
+    # 未発言ペルソナが残る間は DONE でも終了させず、未発言者を選ぶ。
+    engine = DiscussionEngine(ScriptedRouter(["DONE"]))  # type: ignore[arg-type]
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="b",
+        persona_keys=("professor", "layperson"),
+        turns=(Turn(persona_key="professor", content="A"),),
+    )
+    assert await engine.select_next_speaker(session) == "layperson"
+
+
+async def test_select_next_speaker_overrides_repeat_while_unspoken() -> None:
+    # 司会が既出ペルソナを選んでも、未発言者がいれば未発言者を優先する。
+    engine = DiscussionEngine(ScriptedRouter(["professor"]))  # type: ignore[arg-type]
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="b",
+        persona_keys=("professor", "layperson"),
+        turns=(Turn(persona_key="professor", content="A"),),
+    )
+    assert await engine.select_next_speaker(session) == "layperson"
+
+
+async def test_select_next_speaker_respects_unspoken_choice() -> None:
+    # 司会が未発言者を選んだ場合はそれを尊重する。
+    engine = DiscussionEngine(ScriptedRouter(["layperson"]))  # type: ignore[arg-type]
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="b",
+        persona_keys=("professor", "expert", "layperson"),
+        turns=(Turn(persona_key="professor", content="A"),),
+    )
+    assert await engine.select_next_speaker(session) == "layperson"
+
+
+async def test_select_next_speaker_round_robin_on_unparseable() -> None:
+    # キーも DONE も含まない解析不能な出力では、議論を終了させずに継続する
+    # （弱いフォールバックモデルが司会選定に失敗しても議論を殺さない）。
+    engine = DiscussionEngine(ScriptedRouter(["???"]))  # type: ignore[arg-type]
+    result = await engine.select_next_speaker(_session())
+    assert result in ("professor", "layperson")
+
+
+async def test_select_next_speaker_round_robin_on_empty() -> None:
+    # 空応答（思考モデルが max_tokens を使い切るケース）でも継続する。
+    engine = DiscussionEngine(ScriptedRouter([""]))  # type: ignore[arg-type]
+    result = await engine.select_next_speaker(_session())
+    assert result in ("professor", "layperson")
+
+
+async def test_select_next_speaker_round_robin_prefers_least_recent() -> None:
+    engine = DiscussionEngine(ScriptedRouter(["解析不能"]))  # type: ignore[arg-type]
+    session = DiscussionSession(
+        session_id="t1",
+        paper_title="P",
+        paper_text="b",
+        persona_keys=("professor", "layperson"),
+        turns=(Turn(persona_key="professor", content="A"),),
+    )
+    # professor が直近に発言済み → 未発言の layperson を選ぶ
+    assert await engine.select_next_speaker(session) == "layperson"
 
 
 async def test_next_turn_selects_then_generates() -> None:
@@ -160,7 +241,7 @@ async def test_next_turn_selects_then_generates() -> None:
 
 async def test_next_turn_returns_none_when_done() -> None:
     engine = DiscussionEngine(ScriptedRouter(["DONE"]))  # type: ignore[arg-type]
-    assert await engine.next_turn(_session()) is None
+    assert await engine.next_turn(_all_spoke_session()) is None
 
 
 async def test_generate_turn_parses_reply_marker() -> None:
@@ -177,7 +258,7 @@ async def test_generate_turn_parses_reply_marker() -> None:
     turn = await engine.generate_turn(session, "expert")
 
     assert turn.reply_to == 0  # professor の発言（index 0）への返信
-    assert turn.content == "なるほど、その点に補足します。"  # マーカー除去済み
+    assert turn.content == "@professor なるほど、その点に補足します。"  # 本文は原文のまま
 
 
 async def test_generate_turn_ignores_self_reply_marker() -> None:

@@ -24,7 +24,16 @@ NEXT_SPEAKER_SYSTEM = (
     "出力は参加者の英語キー（例: professor）1つ、または DONE のみ。説明は不要です。"
 )
 
-_REPLY_MARKER_RE = re.compile(r"^\s*@(\w+)\b[\s:、,]*")
+_DONE_RE = re.compile(r"\bdone\b", re.IGNORECASE)
+
+
+def is_done_signal(text: str) -> bool:
+    """司会の出力が議論の終了（DONE）を示すかを判定する。
+
+    有効なペルソナキーが取れなかったときに、「終了の意思表示」と「単なる解析不能」を
+    区別するために使う。前者は議論を終え、後者は継続（ラウンドロビン）させる。
+    """
+    return bool(_DONE_RE.search(text))
 
 
 def _roster(personas: tuple[Persona, ...]) -> str:
@@ -73,30 +82,29 @@ def parse_next_speaker(text: str, valid_keys: list[str]) -> str | None:
     return None
 
 
-def _resolve_alias(token: str, aliases: dict[str, str]) -> str | None:
-    """``@`` 直後のトークンをペルソナキーに解決する。
-
-    完全一致を優先し、無ければ最長の前方一致（例: ``他分野の研究生さん`` → ``他分野の研究生``）。
-    モデルが表示名に敬称（さん/方 等）を付けても解決できるようにする。
-    """
-    if token in aliases:
-        return aliases[token]
-    best_name: str | None = None
+def _longest_leading_alias(text: str, aliases: dict[str, str]) -> str | None:
+    """``text`` の先頭に一致する最長のエイリアス名を返す（無ければ None）。"""
+    best: str | None = None
     for name in aliases:
-        if token.startswith(name) and (best_name is None or len(name) > len(best_name)):
-            best_name = name
-    return aliases[best_name] if best_name is not None else None
+        if name and text.startswith(name) and (best is None or len(name) > len(best)):
+            best = name
+    return best
 
 
 def parse_reply_marker(text: str, aliases: dict[str, str]) -> tuple[str | None, str]:
-    """先頭の ``@名前`` 返信マーカーを解析し、(対象ペルソナキー, 除去後の本文) を返す。
+    """先頭の ``@名前`` メンションから返信先ペルソナを検出する。
 
-    ``aliases`` はキー/表示名 → ペルソナキーの対応。モデルは表示名（例: @教授）でも
-    キー（例: @professor）でも、敬称付き（例: @教授さん）でも書きうるため許容する。
+    本文は加工せず原文のまま返し（``@名前`` は残す）、誰への返信かだけを判定する。
+    検出結果は引用ブロック表示（reply_to）に使う。
+
+    ``aliases`` はキー/表示名/略称 → ペルソナキーの対応。略称・敬称付き
+    （例: ``@研究生さん``）でも、エイリアスが先頭一致すれば検出できる。
     """
-    match = _REPLY_MARKER_RE.match(text)
-    if match:
-        key = _resolve_alias(match.group(1), aliases)
-        if key is not None:
-            return key, text[match.end() :].strip()
-    return None, text.strip()
+    body = text.strip()
+    stripped = text.lstrip()
+    if not stripped.startswith("@"):
+        return None, body
+    name = _longest_leading_alias(stripped[1:], aliases)
+    if name is None:
+        return None, body
+    return aliases[name], body

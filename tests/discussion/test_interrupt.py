@@ -4,6 +4,7 @@ from thesis_ai.discussion.engine import DiscussionEngine
 from thesis_ai.discussion.interrupt import (
     build_next_speaker_messages,
     build_selector_messages,
+    is_done_signal,
     parse_next_speaker,
     parse_persona_key,
     parse_reply_marker,
@@ -52,6 +53,18 @@ def test_parse_next_speaker_returns_key() -> None:
     assert parse_next_speaker("  Layperson です\n", keys) == "layperson"
 
 
+def test_is_done_signal_detects_done() -> None:
+    assert is_done_signal("DONE")
+    assert is_done_signal("done")
+    assert is_done_signal("もう十分なので DONE です")
+
+
+def test_is_done_signal_false_for_other_text() -> None:
+    assert not is_done_signal("professor")
+    assert not is_done_signal("???")
+    assert not is_done_signal("")
+
+
 def test_parse_next_speaker_done_or_unknown_returns_none() -> None:
     keys = ["professor", "expert"]
     assert parse_next_speaker("DONE", keys) is None
@@ -70,23 +83,49 @@ def test_build_next_speaker_messages_lists_personas() -> None:
 _ALIASES = {"professor": "professor", "教授": "professor", "expert": "expert", "専門家": "expert"}
 
 
-def test_parse_reply_marker_extracts_key() -> None:
+def test_parse_reply_marker_detects_target_keeps_body() -> None:
+    # 返信先は検出するが、本文は原文のまま（@名前を残す）。
     target, body = parse_reply_marker("@professor それは違います", _ALIASES)
     assert target == "professor"
-    assert body == "それは違います"
+    assert body == "@professor それは違います"
 
 
 def test_parse_reply_marker_accepts_display_name() -> None:
     target, body = parse_reply_marker("@教授\nそれは違います", _ALIASES)
     assert target == "professor"
-    assert body == "それは違います"
+    assert body == "@教授\nそれは違います"
 
 
-def test_parse_reply_marker_tolerates_honorific() -> None:
+def test_parse_reply_marker_detects_with_honorific() -> None:
     aliases = {"他分野の研究生": "grad_student", "教授": "professor"}
     target, body = parse_reply_marker("@他分野の研究生さん、鋭い質問ですね。", aliases)
     assert target == "grad_student"
-    assert body == "鋭い質問ですね。"
+    assert body == "@他分野の研究生さん、鋭い質問ですね。"
+
+
+def test_parse_reply_marker_keeps_name_when_in_sentence() -> None:
+    # 文中参照（@名前さん + 助詞）でも本文は原文のまま、返信先だけ検出する。
+    aliases = {"他分野の研究生": "grad_student", "ドメイン専門家": "expert"}
+    target, body = parse_reply_marker("@他分野の研究生 さんの例えを聞いて、なるほど", aliases)
+    assert target == "grad_student"
+    assert body == "@他分野の研究生 さんの例えを聞いて、なるほど"
+
+
+def test_parse_reply_marker_resolves_abbreviated_name() -> None:
+    # モデルが表示名を略す（他分野の研究生→研究生 / ドメイン専門家→専門家）ケース。
+    aliases = {
+        "他分野の研究生": "grad_student",
+        "研究生": "grad_student",
+        "ドメイン専門家": "expert",
+        "専門家": "expert",
+    }
+    target, body = parse_reply_marker("@研究生さん、なるほど", aliases)
+    assert target == "grad_student"
+    assert body == "@研究生さん、なるほど"
+
+    target2, body2 = parse_reply_marker("@専門家 それは違います", aliases)
+    assert target2 == "expert"
+    assert body2 == "@専門家 それは違います"
 
 
 def test_parse_reply_marker_none_when_no_marker() -> None:

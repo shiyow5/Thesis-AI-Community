@@ -8,7 +8,7 @@ from thesis_ai.discussion.session import STATUS_IDLE, Turn
 from thesis_ai.discussion.store import SessionStore
 from thesis_ai.llm.base import Message
 from thesis_ai.papers.models import Paper
-from thesis_ai.personas import Persona
+from thesis_ai.personas import PROFESSOR, Persona
 
 
 def _is_selection(messages: list[Message]) -> bool:
@@ -125,7 +125,8 @@ async def test_run_discussion_full_flow(tmp_path: Path) -> None:
 
 
 async def test_run_discussion_stops_when_done(tmp_path: Path) -> None:
-    engine = DiscussionEngine(StubRouter(["professor"]))  # type: ignore[arg-type]
+    # 単一ペルソナ構成: 全員（=professor）が発言した後に DONE で終了する。
+    engine = DiscussionEngine(StubRouter(["professor"]), personas=(PROFESSOR,))  # type: ignore[arg-type]
     store = SessionStore(tmp_path / "db.sqlite3")
     poster = FakePoster()
 
@@ -138,7 +139,7 @@ async def test_run_discussion_stops_when_done(tmp_path: Path) -> None:
         store=store,
     )
 
-    # 1 発言の後に司会が DONE → 終了
+    # 1 発言の後に司会が DONE → 全員発言済みなので終了
     assert len(session.turns) == 1
     assert len(poster.posts) == 1
 

@@ -25,8 +25,10 @@ logger = logging.getLogger(__name__)
 # 要約生成に渡す論文本文の上限。Gemma 無料枠の入力 16,000 tokens/分 に収まる範囲に抑える
 _DEFAULT_MAX_PAPER_CHARS = 48_000
 _DEFAULT_MAX_TURNS = 20
-_DEFAULT_MAX_TOKENS = 1024
-_DEFAULT_INTERRUPT_MAX_TOKENS = 1536
+# 発言本文の出力上限。Gemma 4 は思考(thinking)モデルで可視出力の前に思考トークンを消費する。
+# 1024 程度だと思考＋本文が収まらず本文が MAX_TOKENS で途中切断されるため余裕を持たせる。
+_DEFAULT_MAX_TOKENS = 2048
+_DEFAULT_INTERRUPT_MAX_TOKENS = 2048
 _SUMMARY_MAX_TOKENS = 2048
 # 司会選定・回答者選定の出力上限。主力 Gemma 4 は思考(thinking)モデルで、可視出力の前に
 # 思考トークンを消費する。16 程度だと思考だけで使い切り可視テキストが空になり
@@ -70,6 +72,9 @@ def compose_system(persona: Persona, session: DiscussionSession, *, max_paper_ch
         "- 必ず日本語で、あなたの視点から簡潔に発言する（200〜400字程度）\n"
         "- 他の参加者の発言を踏まえ、質問・反論・補足・言い換えを行う\n"
         "- 未回答の質問が残っていれば、可能な範囲で必ず答える\n"
+        "- 断定や教科書的な言い切りを避け、『〜と考えます』『〜のように思われます』"
+        "『〜かもしれません』のように、自分の見解として柔らかく人間らしい口調で述べる\n"
+        "- 文を途中で切らず、最後まで言い切ってから終える\n"
         "- 特定の参加者の発言に直接返信する場合は、本文の最初に @相手の名前（例: @教授）を"
         "1つだけ書く。新しい論点や全体への発言なら何も付けない\n"
         "- 名前や見出しを付けず、発言内容のみを書く"
@@ -182,7 +187,22 @@ class DiscussionEngine:
             max_tokens=_SELECT_MAX_TOKENS,
         )
         n = len(session.turns)
-        chosen = parse_next_speaker(raw, [p.key for p in personas])
+        keys = [p.key for p in personas]
+        chosen = parse_next_speaker(raw, keys)
+        spoken = {turn.persona_key for turn in session.turns}
+        unspoken = [k for k in keys if k not in spoken]
+
+        # 全ペルソナが最低 1 回発言するまでは終了させず、未発言者を優先する。
+        if unspoken:
+            if chosen is not None and chosen in unspoken:
+                logger.info("司会選定: raw=%r -> %s (turn数=%d)", raw.strip(), chosen, n)
+                return chosen
+            fallback = self._round_robin(session, personas)
+            logger.info(
+                "司会選定(未発言者優先): raw=%r -> %s (turn数=%d)", raw.strip(), fallback, n
+            )
+            return fallback
+
         if chosen is not None:
             logger.info("司会選定: raw=%r -> %s (turn数=%d)", raw.strip(), chosen, n)
             return chosen

@@ -102,6 +102,26 @@ def test_parse_reply_marker_tolerates_honorific() -> None:
     assert body == "鋭い質問ですね。"
 
 
+def test_parse_reply_marker_strips_orphan_honorific_after_space() -> None:
+    # モデルが「@表示名 さん」と空白＋敬称で書くと、敬称「さん」が本文に残りやすい。
+    aliases = {"他分野の研究生": "grad_student", "一般の人": "layperson"}
+    target, body = parse_reply_marker("@他分野の研究生 さん、ありがとうございます。", aliases)
+    assert target == "grad_student"
+    assert body == "ありがとうございます。"
+
+
+def test_parse_reply_marker_resolves_abbreviated_name() -> None:
+    # モデルが表示名を略す（他分野の研究生→研究生 / ドメイン専門家→専門家）ケース。
+    aliases = {"他分野の研究生": "grad_student", "ドメイン専門家": "expert"}
+    target, body = parse_reply_marker("@研究生さん、なるほど", aliases)
+    assert target == "grad_student"
+    assert body == "なるほど"
+
+    target2, body2 = parse_reply_marker("@専門家 それは違います", aliases)
+    assert target2 == "expert"
+    assert body2 == "それは違います"
+
+
 def test_parse_reply_marker_none_when_no_marker() -> None:
     target, body = parse_reply_marker("全体への発言です", _ALIASES)
     assert target is None

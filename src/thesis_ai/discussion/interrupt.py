@@ -83,19 +83,42 @@ def parse_next_speaker(text: str, valid_keys: list[str]) -> str | None:
     return None
 
 
+_HONORIFICS = ("さん", "さま", "様", "氏", "先生", "くん", "君", "ちゃん")
+_LEADING_HONORIFIC_RE = re.compile(rf"^(?:{'|'.join(_HONORIFICS)})[\s:、,]*")
+
+
+def _strip_honorific_suffix(token: str) -> str:
+    """トークン末尾の敬称（例: ``研究生さん`` → ``研究生``）を 1 つ取り除く。"""
+    for honorific in _HONORIFICS:
+        if token.endswith(honorific) and len(token) > len(honorific):
+            return token[: -len(honorific)]
+    return token
+
+
 def _resolve_alias(token: str, aliases: dict[str, str]) -> str | None:
     """``@`` 直後のトークンをペルソナキーに解決する。
 
-    完全一致を優先し、無ければ最長の前方一致（例: ``他分野の研究生さん`` → ``他分野の研究生``）。
-    モデルが表示名に敬称（さん/方 等）を付けても解決できるようにする。
+    完全一致 → 最長前方一致 → 部分一致の順で試す。モデルは表示名に敬称を付けたり
+    （例: ``@教授さん``）、表示名を略したり（例: ``他分野の研究生`` → ``研究生``）するため、
+    末尾敬称を落としたうえで柔軟に解決する。
     """
+    token = _strip_honorific_suffix(token.strip())
+    if not token:
+        return None
     if token in aliases:
         return aliases[token]
     best_name: str | None = None
     for name in aliases:
         if token.startswith(name) and (best_name is None or len(name) > len(best_name)):
             best_name = name
-    return aliases[best_name] if best_name is not None else None
+    if best_name is not None:
+        return aliases[best_name]
+    # 略称: トークンと表示名のどちらかが他方を含む（誤マッチ抑制のため 2 文字以上）。
+    if len(token) >= 2:
+        for name in aliases:
+            if len(name) >= 2 and (token in name or name in token):
+                return aliases[name]
+    return None
 
 
 def parse_reply_marker(text: str, aliases: dict[str, str]) -> tuple[str | None, str]:
@@ -103,10 +126,13 @@ def parse_reply_marker(text: str, aliases: dict[str, str]) -> tuple[str | None, 
 
     ``aliases`` はキー/表示名 → ペルソナキーの対応。モデルは表示名（例: @教授）でも
     キー（例: @professor）でも、敬称付き（例: @教授さん）でも書きうるため許容する。
+    また ``@表示名 さん`` のように空白＋敬称で書かれると本文先頭に敬称が残るため除去する。
     """
     match = _REPLY_MARKER_RE.match(text)
     if match:
         key = _resolve_alias(match.group(1), aliases)
         if key is not None:
-            return key, text[match.end() :].strip()
+            rest = text[match.end() :]
+            rest = _LEADING_HONORIFIC_RE.sub("", rest, count=1)
+            return key, rest.strip()
     return None, text.strip()

@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import logging
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -18,6 +19,8 @@ from thesis_ai.llm.base import (
     RateLimitError,
     TransientLLMError,
 )
+
+logger = logging.getLogger(__name__)
 
 Clock = Callable[[], float]
 Sleeper = Callable[[float], Awaitable[None]]
@@ -111,6 +114,7 @@ class LLMRouter:
         for model in self._chain:
             if not model.limiter.allow():
                 last_error = RateLimitError(f"{model.name}: local rate limit reached")
+                logger.warning("%s: ローカルレート枠超過のためスキップ", model.name)
                 continue
 
             transient_left = self._max_retries
@@ -121,20 +125,32 @@ class LLMRouter:
                 except RateLimitError as exc:
                     last_error = exc
                     if rate_limit_left <= 0:
+                        logger.warning("%s: 429 再試行枠を使い切り次段へ: %s", model.name, exc)
                         break  # 再試行枠を使い切った → 次のモデルへ
                     rate_limit_left -= 1
-                    await self._sleep(_rate_limit_wait(model, exc))
+                    wait = _rate_limit_wait(model, exc)
+                    logger.warning("%s: 429 のため %.1fs 待って再試行: %s", model.name, wait, exc)
+                    await self._sleep(wait)
                     continue  # TPM 回復を待って同一モデルを再試行
                 except TransientLLMError as exc:
                     last_error = exc
                     if transient_left <= 0:
+                        logger.warning("%s: 一時エラーのリトライ尽き次段へ: %s", model.name, exc)
                         break  # リトライ尽きた → 次のモデルへ
                     attempt = self._max_retries - transient_left
                     transient_left -= 1
+                    logger.warning("%s: 一時エラーでバックオフ再試行: %s", model.name, exc)
                     await self._sleep(self._backoff_base * (2**attempt))
                     continue
                 except LLMError as exc:
                     last_error = exc
+                    logger.warning(
+                        "%s: 非リトライ系エラー(%s)で次段へ: %s",
+                        model.name,
+                        type(exc).__name__,
+                        exc,
+                    )
                     break  # 非リトライ系 → 次のモデルへ
 
+        logger.error("全モデルが失敗: %s", last_error)
         raise last_error

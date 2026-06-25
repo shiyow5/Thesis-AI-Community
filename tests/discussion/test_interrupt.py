@@ -8,6 +8,7 @@ from thesis_ai.discussion.interrupt import (
     parse_next_speaker,
     parse_persona_key,
     parse_reply_marker,
+    strip_leading_persona_mention,
 )
 from thesis_ai.discussion.session import DiscussionSession, Turn
 from thesis_ai.llm.base import Message
@@ -140,6 +141,29 @@ def test_parse_reply_marker_unknown_ignored() -> None:
     assert body == "@unknown これは？"
 
 
+def test_strip_leading_persona_mention_removes_clean_token() -> None:
+    # 割り込み回答が誤って @教授 で始まる場合、@教授 だけを除去し本文は残す。
+    assert strip_leading_persona_mention("@教授 D4LAは…です", _ALIASES) == "D4LAは…です"
+
+
+def test_strip_leading_persona_mention_keeps_following_honorific() -> None:
+    # 「@名前さんに…」の文中型でも @名前 だけ外し、後続(さんに…)は残す
+    # （呼びかけ先をユーザーへ差し替えられるようにするため）。
+    aliases = {"一般の人": "layperson", "一般": "layperson"}
+    assert (
+        strip_leading_persona_mention("@一般の人 さんに分かりやすく例を挙げますね", aliases)
+        == "さんに分かりやすく例を挙げますね"
+    )
+
+
+def test_strip_leading_persona_mention_noop_without_marker() -> None:
+    assert strip_leading_persona_mention("ご質問ありがとうございます。", _ALIASES) == (
+        "ご質問ありがとうございます。"
+    )
+    # 未知の @名前 は除去しない（ペルソナ宛てとは限らないため）
+    assert strip_leading_persona_mention("@unknown これは？", _ALIASES) == "@unknown これは？"
+
+
 def test_build_selector_messages_lists_all_personas() -> None:
     messages = build_selector_messages(DEFAULT_PERSONAS, "これは何の役に立つの？")
 
@@ -179,3 +203,16 @@ async def test_answer_interrupt_uses_selected_persona_and_context() -> None:
     assert "再現性は？" in answer_prompt
     assert "導入の説明" in answer_prompt
     assert "字程度" in answer_prompt  # 切れ防止の長さ指示
+
+
+async def test_answer_interrupt_strips_wrong_leading_mention() -> None:
+    # 割り込み回答は質問者への返答。モデルが冒頭に付けた誤った @教授 は除去する。
+    router = ScriptedRouter(["expert", "@教授 D4LAはデータセットです。"])
+    engine = DiscussionEngine(router)  # type: ignore[arg-type]
+
+    turn = await engine.answer_interrupt(_session(), "D4LAとは？")
+
+    assert turn.persona_key == "expert"
+    assert turn.content == "D4LAはデータセットです。"
+    # プロンプトで「@参加者名を付けない」旨を明示している
+    assert "参加者名" in router.calls[1][-1].content

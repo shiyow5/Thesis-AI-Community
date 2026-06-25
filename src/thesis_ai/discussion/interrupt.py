@@ -91,6 +91,22 @@ def _longest_leading_alias(text: str, aliases: dict[str, str]) -> str | None:
     return best
 
 
+def strip_leading_persona_mention(text: str, aliases: dict[str, str]) -> str:
+    """先頭の ``@ペルソナ名`` を取り除いた本文を返す（割り込み回答用）。
+
+    割り込み回答は議論参加者ではなく質問者（ユーザー）への返答なので、モデルが付けがちな
+    冒頭の ``@参加者名`` は誤り。検出して ``@名前`` のトークンだけ除去する（後続の
+    「さん」「に」等の助詞・敬称は残し、呼びかけ先をユーザーへ差し替えられるようにする）。
+    """
+    stripped = text.lstrip()
+    if not stripped.startswith("@"):
+        return text.strip()
+    name = _longest_leading_alias(stripped[1:], aliases)
+    if name is None:
+        return text.strip()
+    return stripped[1 + len(name) :].lstrip()
+
+
 def parse_reply_marker(text: str, aliases: dict[str, str]) -> tuple[str | None, str]:
     """先頭の ``@名前`` メンションから返信先ペルソナを検出する。
 

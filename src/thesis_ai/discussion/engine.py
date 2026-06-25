@@ -14,6 +14,7 @@ from thesis_ai.discussion.interrupt import (
     parse_next_speaker,
     parse_persona_key,
     parse_reply_marker,
+    strip_leading_persona_mention,
 )
 from thesis_ai.discussion.session import DiscussionSession, Turn
 from thesis_ai.llm.base import Message
@@ -252,12 +253,16 @@ class DiscussionEngine:
         history_block = f"これまでの議論:\n{history}\n\n" if history else ""
         prompt = (
             f"{history_block}"
-            f"参加者への質問: {user_message}\n\n"
+            f"視聴者からの質問: {user_message}\n\n"
             f"あなた（{persona.display_name}）として、この質問に日本語で答えてください。"
+            "これは議論参加者ではなく視聴者への返答です。冒頭に「@参加者名」は付けず、"
+            "質問者に向けて直接答えてください。"
             "会話なのでできるだけ簡潔に。長くても300字程度に収め、途中で切らず最後まで答えきること。"
         )
         text = await self._router.generate(
             [Message(role="system", content=system), Message(role="user", content=prompt)],
             max_tokens=self._interrupt_max_tokens,
         )
-        return Turn(persona_key=persona_key, content=text.strip())
+        # 万一モデルが冒頭に @参加者名 を付けても、ユーザーへの返答なので除去する。
+        content = strip_leading_persona_mention(text, self._reply_aliases())
+        return Turn(persona_key=persona_key, content=content)

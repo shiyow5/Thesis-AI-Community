@@ -104,7 +104,11 @@ class ThesisBot(discord.Client):
             session = self.context.store.load(str(message.channel.id))
             if session is not None and message.content.strip():
                 self.loop.create_task(
-                    self._handle_interrupt(str(message.channel.id), message.content.strip())
+                    self._handle_interrupt(
+                        str(message.channel.id),
+                        message.content.strip(),
+                        message.author.mention,
+                    )
                 )
             return
 
@@ -117,7 +121,7 @@ class ThesisBot(discord.Client):
         target = DiscordThreadTarget(message.channel)
         self.loop.create_task(self._start_discussion(target, query))
 
-    async def _handle_interrupt(self, thread_id: str, text: str) -> None:
+    async def _handle_interrupt(self, thread_id: str, text: str, user_mention: str) -> None:
         # 同一スレッドへの割り込みは直列化し、応答が交錯しないようにする
         lock = self._interrupt_locks.setdefault(thread_id, asyncio.Lock())
         async with lock:
@@ -134,7 +138,8 @@ class ThesisBot(discord.Client):
             persona = get_persona(turn.persona_key)
             if persona is not None:
                 snippet = " ".join(text.split())[:80]
-                content = f"> **質問**: {snippet}…\n\n{turn.content}"
+                # 回答は質問者（ユーザー）への返答。質問者を正しくメンションして通知する。
+                content = f"> **質問**: {snippet}…\n\n{user_mention} {turn.content}"
                 await self.context.poster.post(persona, content, thread_id=thread_id)
 
     async def _start_discussion(self, target: ThreadTarget, query: str) -> None:

@@ -25,15 +25,17 @@ logger = logging.getLogger(__name__)
 # 要約生成に渡す論文本文の上限。Gemma 無料枠の入力 16,000 tokens/分 に収まる範囲に抑える
 _DEFAULT_MAX_PAPER_CHARS = 48_000
 _DEFAULT_MAX_TURNS = 20
-# 発言本文の出力上限。Gemma 4 は思考(thinking)モデルで可視出力の前に思考トークンを消費する。
-# 1024 程度だと思考＋本文が収まらず本文が MAX_TOKENS で途中切断されるため余裕を持たせる。
-_DEFAULT_MAX_TOKENS = 2048
-_DEFAULT_INTERRUPT_MAX_TOKENS = 2048
-_SUMMARY_MAX_TOKENS = 2048
-# 司会選定・回答者選定の出力上限。主力 Gemma 4 は思考(thinking)モデルで、可視出力の前に
-# 思考トークンを消費する。16 程度だと思考だけで使い切り可視テキストが空になり
-# フォールバックを誘発するため、思考＋短い回答が収まる余裕を持たせる。
-_SELECT_MAX_TOKENS = 512
+# 出力トークン上限。主力 Gemma 4 は thinking 常時 ON（thinking_budget=0 での無効化は
+# 400 INVALID_ARGUMENT で不可）で、可視出力の前に思考トークンを ~400-700 消費する。
+# そのため各上限は「可視出力に必要な分 + 思考分(~800)」を見込む。不足すると
+# finish_reason=MAX_TOKENS で可視テキストが空/途中切断になり、空応答→フォールバックを
+# 誘発する（実測で確認）。
+_DEFAULT_MAX_TOKENS = 2048  # 発言本文(200-400字 ~600tok) + 思考
+_DEFAULT_INTERRUPT_MAX_TOKENS = 2048  # 割り込み回答(~300字) + 思考
+_SUMMARY_MAX_TOKENS = 4096  # 構造化要約(~1000字 ~1800tok) + 思考。2048 では思考込みで不足し得る
+# 司会選定・回答者選定: 可視出力は英語キー1語だが、長い履歴では思考が 600+ tok に達し、
+# 512 では MAX_TOKENS で可視テキストが空になる（実測 thoughts=509-614）。思考が収まる余裕を取る。
+_SELECT_MAX_TOKENS = 2048
 
 _SUMMARY_SYSTEM = "あなたは論文を分かりやすく日本語で要約する専門家です。"
 _SUMMARY_INSTRUCTION = (

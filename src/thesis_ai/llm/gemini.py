@@ -4,6 +4,7 @@
 同じコードパスで呼び分ける。
 """
 
+import logging
 from typing import Any
 
 import httpx
@@ -16,6 +17,8 @@ from thesis_ai.llm.base import (
     RateLimitError,
     TransientLLMError,
 )
+
+logger = logging.getLogger(__name__)
 
 _ROLE_MAP = {"user": "user", "model": "model", "assistant": "model"}
 
@@ -60,7 +63,9 @@ class GeminiClient:
             "max_output_tokens": max_tokens,
         }
         # Gemini 2.5 系は thinking が max_output_tokens を消費し可視出力が切れるため、
-        # thinking_budget=0 で無効化する（Gemma 4 は thinking 非対応なので None のまま）。
+        # thinking_budget=0 で無効化する。Gemma 4 も thinking モデルだが thinking_budget の
+        # 指定自体が 400 INVALID_ARGUMENT になる（無効化不可）ため None のまま呼び、思考分は
+        # 呼び出し側が max_tokens に余裕を持たせて吸収する。
         if self._thinking_budget is not None:
             config_kwargs["thinking_config"] = types.ThinkingConfig(
                 thinking_budget=self._thinking_budget
@@ -80,5 +85,18 @@ class GeminiClient:
 
         text = resp.text
         if not text:
-            raise LLMError("empty response from Gemini")
+            # thinking モデル（Gemma 4 等）は思考トークンが max_output_tokens を使い切ると
+            # finish_reason=MAX_TOKENS で可視テキストが出ず空になる。原因追跡のため詳細を残す。
+            candidates = getattr(resp, "candidates", None) or []
+            finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
+            usage = getattr(resp, "usage_metadata", None)
+            thoughts = getattr(usage, "thoughts_token_count", None) if usage else None
+            logger.warning(
+                "Gemini 空応答: model=%s finish_reason=%s thoughts_tokens=%s max_tokens=%s",
+                self._model,
+                finish_reason,
+                thoughts,
+                max_tokens,
+            )
+            raise LLMError(f"empty response from Gemini (finish_reason={finish_reason})")
         return text

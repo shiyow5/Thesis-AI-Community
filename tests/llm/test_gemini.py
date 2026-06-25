@@ -62,6 +62,22 @@ async def test_empty_response_raises_llm_error() -> None:
         await gemini.generate(_MSGS)
 
 
+async def test_empty_response_surfaces_finish_reason() -> None:
+    # thinking が max_output_tokens を使い切ると text=None / finish_reason=MAX_TOKENS になる。
+    # 原因追跡できるよう finish_reason をエラーメッセージに含める。
+    resp = SimpleNamespace(
+        text=None,
+        candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+        usage_metadata=SimpleNamespace(thoughts_token_count=509),
+    )
+    gen = AsyncMock(return_value=resp)
+    fake = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=gen)))
+    gemini = GeminiClient(api_key="x", model="gemma-4", client=cast(genai.Client, fake))
+
+    with pytest.raises(LLMError, match="MAX_TOKENS"):
+        await gemini.generate(_MSGS)
+
+
 async def test_rate_limit_error_mapped() -> None:
     client, _ = _fake_client(exc=errors.ClientError(429, {"error": {"message": "quota"}}))
     gemini = GeminiClient(api_key="x", model="gemma-4", client=client)
